@@ -18,14 +18,23 @@ function binarizarCanvas(canvas, limiar = 150) {
   return canvas;
 }
 
-function carregarImagemEmCanvas(arquivoOuUrl, fatorEscala = 2) {
+function calcularEscalaSegura(largura, altura, fatorDesejado, limiteMaximo = 4096) {
+  const maiorLadoAlvo = Math.max(largura, altura) * fatorDesejado;
+  if (maiorLadoAlvo <= limiteMaximo) return fatorDesejado;
+  return limiteMaximo / Math.max(largura, altura);
+}
+
+function carregarImagemEmCanvas(arquivoOuUrl, fatorEscalaDesejado = 2) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
+      // Limita o tamanho final do canvas — fotos/prints muito altos (ex.: print
+      // de tela emendando duas páginas) poderiam gerar um canvas gigante e
+      // travar o navegador. Prints normais de fatura continuam sendo ampliados
+      // em 2x normalmente.
+      const fatorEscala = calcularEscalaSegura(img.naturalWidth, img.naturalHeight, fatorEscalaDesejado);
+
       const canvas = document.createElement('canvas');
-      // Amplia a imagem (fotos de fatura em baixa resolução tendem a ter fonte
-      // pequena, e o Tesseract "apaga" texto miúdo como se fosse ruído — ampliar
-      // antes do OCR reduz bastante esse problema)
       canvas.width = img.naturalWidth * fatorEscala;
       canvas.height = img.naturalHeight * fatorEscala;
       const ctx = canvas.getContext('2d');
@@ -163,7 +172,11 @@ async function extrairTextoDoDocumento(arquivo, aoProgredir) {
     });
   } else if (tipo === 'imagem') {
     notificar('Abrindo a imagem...', 0);
-    canvases = [await carregarImagemEmCanvas(arquivo)];
+    try {
+      canvases = [await carregarImagemEmCanvas(arquivo)];
+    } catch (erro) {
+      throw new Error('Não consegui abrir essa imagem. Confira se o arquivo não está corrompido e tente outra foto.');
+    }
   } else {
     throw new Error('Tipo de arquivo não suportado para OCR (use PDF ou imagem).');
   }
