@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mais — Finanças Fácil</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/mais.css">
+<link rel="stylesheet" href="css/seguranca.css">
+</head>
+<body>
+<script src="js/storage-migracao.js"></script>
+<script src="js/seguranca.js"></script>
+
+<div id="app">
+  <div class="screen">
+    <div class="page-title">Mais</div>
+
+    <div class="profile-card">
+      <div class="avatar">💰</div>
+      <div>
+        <div class="profile-name" id="profileNome">Finanças Fácil</div>
+        <div class="profile-sub">Todos os dados ficam só no seu iPhone</div>
+      </div>
+    </div>
+
+    <div class="group-title">Gestão financeira</div>
+    <div class="menu-card">
+      <div class="menu-item clickable" onclick="removerFotoPerfil()">
+        <div class="menu-icon">🖼️</div>
+        <div class="menu-label">Remover foto de perfil</div>
+        <span class="menu-chevron">›</span>
+      </div>
+      <div class="menu-item clickable" onclick="location.href='cartoes.html'">
+        <div class="menu-icon">💳</div>
+        <div class="menu-label">Cartões cadastrados</div>
+        <span class="menu-value" id="qtdCartoes">—</span>
+        <span class="menu-chevron">›</span>
+      </div>
+      <div class="menu-item clickable" onclick="location.href='categorias.html'">
+        <div class="menu-icon">🏷️</div>
+        <div class="menu-label">Categorias</div>
+        <span class="menu-value" id="qtdCategorias">—</span>
+        <span class="menu-chevron">›</span>
+      </div>
+      <div class="menu-item clickable" onclick="abrirModalValor('reserva')">
+        <div class="menu-icon">🎯</div>
+        <div class="menu-label">Reserva de emergência</div>
+        <span class="menu-value" id="metaReserva">—</span>
+        <span class="menu-chevron">›</span>
+      </div>
+      <div class="menu-item clickable" onclick="abrirModalValor('renda')">
+        <div class="menu-icon">💵</div>
+        <div class="menu-label">Renda mensal fixa</div>
+        <span class="menu-value" id="rendaFixa">—</span>
+        <span class="menu-chevron">›</span>
+      </div>
+      <div class="menu-item clickable" onclick="limparDespesasExemplo()">
+        <div class="menu-icon">🧹</div>
+        <div class="menu-label">Limpar despesas de exemplo</div>
+        <span class="menu-chevron">›</span>
+      </div>
+    </div>
+
+    <div class="group-title">Segurança e privacidade</div>
+    <div class="menu-card">
+      <div class="menu-item clickable" onclick="Seguranca.alterarPin()">
+        <div class="menu-icon">🔢</div>
+        <div class="menu-label">Alterar PIN</div>
+        <span class="menu-chevron">›</span>
+      </div>
+      <div class="menu-item clickable" onclick="alternarFaceId()">
+        <div class="menu-icon">🔒</div>
+        <div class="menu-label">Face ID / Touch ID para abrir o app</div>
+        <div class="toggle" id="toggleFaceId"></div>
+      </div>
+      <div class="menu-item clickable" onclick="exportarDados()">
+        <div class="menu-icon">💾</div>
+        <div class="menu-label">Exportar meus dados</div>
+        <span class="menu-chevron">›</span>
+      </div>
+      <div class="menu-item clickable" onclick="apagarTudo()">
+        <div class="menu-icon">🗑️</div>
+        <div class="menu-label danger-text">Apagar todos os dados</div>
+        <span class="menu-chevron">›</span>
+      </div>
+    </div>
+
+    <div class="app-version">Finanças Fácil · versão 1.0.0 · 100% local</div>
+  </div>
+
+  <div class="tabbar">
+    <a href="index.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⌂</span>Início</a>
+    <a href="transacoes.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⇄</span>Transações</a>
+    <a href="relatorios.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">◔</span>Relatórios</a>
+    <div class="tab-item active"><span class="tab-icon">⋯</span>Mais</div>
+  </div>
+</div>
+
+<!-- Modal de edição de valor (renda mensal ou meta da reserva) -->
+<div class="sheet-overlay" id="sheetOverlayValor" onclick="fecharModalValorSeClicarFora(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="tituloModalValor">Editar valor</div>
+    <input type="text" inputmode="numeric" class="value-input" id="inputModalValor" placeholder="R$ 0,00">
+    <button class="save-btn" onclick="salvarModalValor()">Salvar</button>
+  </div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/moeda.js"></script>
+<script src="js/mais.js"></script>
+</body>
+</html>

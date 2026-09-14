@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Relatórios — Finanças Fácil</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/relatorios.css">
+<link rel="stylesheet" href="css/seguranca.css">
+</head>
+<body>
+<script src="js/storage-migracao.js"></script>
+<script src="js/seguranca.js"></script>
+
+<div id="app">
+  <div class="screen">
+    <div class="page-title">Relatórios</div>
+    <div class="page-sub">Veja como está sua vida financeira</div>
+
+    <div class="overview-card">
+      <div class="overview-title">Visão geral do mês</div>
+      <div class="overview-grid">
+        <div class="overview-col">
+          <div class="overview-label">Receitas</div>
+          <div class="overview-value income" id="ovReceitas">R$ 0,00</div>
+        </div>
+        <div class="overview-col">
+          <div class="overview-label">Despesas</div>
+          <div class="overview-value expense" id="ovDespesas">R$ 0,00</div>
+          <div class="overview-delta" id="ovDelta">—</div>
+        </div>
+        <div class="overview-col">
+          <div class="overview-label">Saldo</div>
+          <div class="overview-value" id="ovSaldo">R$ 0,00</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-head"><div class="section-head-title">📊 Evolução dos gastos</div></div>
+    <div class="chart-card">
+      <svg viewBox="0 0 320 80" preserveAspectRatio="none" id="chartSvg">
+        <defs>
+          <linearGradient id="fillArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2F5FE0" stop-opacity="0.18"/>
+            <stop offset="100%" stop-color="#2F5FE0" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path id="areaPath" fill="url(#fillArea)" stroke="none"></path>
+        <path id="linePath" fill="none" stroke="#2F5FE0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <div class="chart-labels"><span id="lblInicio">1</span><span id="lblMeio">—</span><span id="lblFim">—</span></div>
+    </div>
+
+    <div class="section-head" style="margin-bottom:2px"><div class="section-head-title">📁 Gastos por categoria</div></div>
+    <div class="cat-hint">Toque em uma coluna para ver os detalhes</div>
+    <div class="bar-chart-card">
+      <div class="bar-chart-row" id="barChartRow"></div>
+    </div>
+    <div id="drillPanel"></div>
+
+    <div class="glossario-card">
+      <div class="glossario-title">O que entra em cada categoria</div>
+      <div class="glossario-item"><strong>🏠 Essenciais</strong> — Moradia, contas, saúde, mercado</div>
+      <div class="glossario-item"><strong>🍴 Alimentação</strong> — Restaurantes e compras de comida</div>
+      <div class="glossario-item"><strong>🚗 Transporte</strong> — Combustível, apps de transporte, transporte público</div>
+      <div class="glossario-item"><strong>🍿 Lazer</strong> — Viagens, restaurantes de lazer, cinema, delivery, assinaturas</div>
+      <div class="glossario-item"><strong>💬 Outros</strong> — Gastos esporádicos ou imprevistos</div>
+    </div>
+
+    <div class="section-head"><div class="section-head-title">💡 Onde posso poupar / investir</div></div>
+    <div id="insightsBox"></div>
+
+    <div class="section-head" style="margin-top:22px"><div class="section-head-title">🎯 Evolução da reserva</div></div>
+    <div class="chart-card" id="reservaChartCard">
+      <div style="text-align:center;padding:10px 0;color:var(--ink-soft);font-size:12.5px">Nenhum aporte registrado ainda.</div>
+    </div>
+
+    <div class="section-head"><div class="section-head-title">💳 Comprometimento do cartão</div></div>
+    <div class="commit-card">
+      <div class="commit-top">
+        <span class="commit-label">Parcelas futuras vs. renda</span>
+        <span class="commit-pct" id="commitPct">0%</span>
+      </div>
+      <div class="commit-track"><div class="commit-fill" id="commitFill" style="width:0%"></div></div>
+      <div class="commit-note" id="commitNote">—</div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <a href="index.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⌂</span>Início</a>
+    <a href="transacoes.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⇄</span>Transações</a>
+    <div class="tab-item active"><span class="tab-icon">◔</span>Relatórios</div>
+    <a href="mais.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⋯</span>Mais</a>
+  </div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/motor.js"></script>
+<script src="js/relatorios.js"></script>
+</body>
+</html>

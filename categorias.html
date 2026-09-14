@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Gerenciar Categorias — Finanças Fácil</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/categorias.css">
+<link rel="stylesheet" href="css/seguranca.css">
+</head>
+<body>
+<script src="js/storage-migracao.js"></script>
+<script src="js/seguranca.js"></script>
+
+<div id="app">
+  <div class="screen">
+    <div class="header-row" style="display:flex;align-items:center;gap:12px;margin-top:8px;margin-bottom:4px">
+      <span onclick="location.href='mais.html'" style="font-size:19px;cursor:pointer">←</span>
+      <span class="page-title" style="margin:0">Gerenciar Categorias</span>
+    </div>
+    <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:18px">Crie categorias suas e escolha em qual coluna dos Relatórios cada uma entra.</div>
+
+    <div class="cat-manage-list" id="listaCategorias"></div>
+
+    <button class="add-cat-btn" onclick="abrirModalCategoria()">+ Nova categoria</button>
+  </div>
+
+  <div class="tabbar">
+    <a href="index.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⌂</span>Início</a>
+    <a href="transacoes.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⇄</span>Transações</a>
+    <a href="relatorios.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">◔</span>Relatórios</a>
+    <a href="mais.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⋯</span>Mais</a>
+  </div>
+</div>
+
+<!-- Modal de nova categoria -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="fecharModalSeClicarFora(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Nova categoria</div>
+
+    <div class="field-label">Nome</div>
+    <input type="text" id="inputNomeCategoria" class="text-input" placeholder="Ex.: Pets, Academia, Cursos...">
+
+    <div class="field-label">Ícone</div>
+    <div class="icon-picker-grid" id="iconPickerGrid"></div>
+
+    <div class="field-label">Em qual coluna dos Relatórios ela entra?</div>
+    <div class="grupo-picker" id="grupoPicker"></div>
+
+    <div class="field-label">Limite mensal (opcional)</div>
+    <input type="text" inputmode="numeric" id="inputLimiteCategoria" class="text-input" placeholder="R$ 0,00">
+
+    <button class="save-btn" onclick="salvarCategoria()">Salvar categoria</button>
+  </div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/moeda.js"></script>
+<script src="js/categorias.js"></script>
+</body>
+</html>

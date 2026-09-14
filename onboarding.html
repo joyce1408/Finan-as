@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Bem-vinda — Finanças Fácil</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+  :root {
+    --bg: #FFFFFF;
+    --card: #F6F7F9;
+    --border: #E9EBF0;
+    --ink: #16233F;
+    --ink-soft: #6B7280;
+    --blue: #1B2A4A;
+    --green: #2F9E62;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  html, body { height: 100%; background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
+
+  .onboarding {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 60px 32px 40px;
+  }
+
+  .onboarding-header { margin-bottom: 48px; }
+
+  .greeting-small { font-size: 14px; color: var(--ink-soft); letter-spacing: 0.3px; margin-bottom: 10px; }
+
+  .greeting-title {
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--ink);
+    line-height: 1.25;
+    letter-spacing: -0.5px;
+  }
+
+  .greeting-sub {
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    margin-top: 18px;
+  }
+
+  .privacy-badge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 14px 16px;
+    margin-top: 24px;
+  }
+
+  .privacy-badge-icon { font-size: 20px; }
+  .privacy-badge-text { font-size: 12.5px; color: var(--ink); line-height: 1.5; }
+  .privacy-badge-text strong { display: block; font-size: 13px; margin-bottom: 2px; }
+
+  .steps { flex: 1; display: flex; flex-direction: column; gap: 26px; margin-top: 48px; }
+
+  .step { display: flex; gap: 16px; align-items: flex-start; }
+
+  .step-number {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--blue);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .step-title { font-size: 14.5px; font-weight: 700; color: var(--ink); margin-bottom: 3px; }
+  .step-text { font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; }
+
+  .cta-btn {
+    width: 100%;
+    padding: 17px;
+    border-radius: 18px;
+    background: var(--blue);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    border: none;
+    margin-top: 40px;
+    letter-spacing: 0.2px;
+  }
+</style>
+</head>
+<body>
+
+<div class="onboarding">
+  <div class="onboarding-header">
+    <div class="greeting-small">OLÁ, JOYCE PINHEIRO</div>
+    <div class="greeting-title">Suas finanças,<br>organizadas do seu jeito.</div>
+    <div class="greeting-sub">Este é o Finanças Fácil — um espaço só seu para entender pra onde vai o seu dinheiro, sem complicação.</div>
+
+    <div class="field-label" style="font-size:12px;color:var(--ink-soft);font-weight:600;margin-top:20px;margin-bottom:6px">Como podemos te chamar?</div>
+    <input type="text" id="inputNomeUsuaria" placeholder="Joyce Pinheiro" style="width:100%;padding:13px 14px;border-radius:14px;border:1px solid var(--border);background:var(--card);font-size:14px;color:var(--ink);font-family:inherit">
+
+    <div class="privacy-badge">
+      <div class="privacy-badge-icon">🔒</div>
+      <div class="privacy-badge-text">
+        <strong>100% local e privado</strong>
+        Tudo o que você cadastra fica só no seu iPhone. Nada é enviado para nenhuma nuvem ou servidor.
+      </div>
+    </div>
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-number">1</div>
+      <div>
+        <div class="step-title">Registre seus gastos</div>
+        <div class="step-text">Toque no botão "+" sempre que fizer uma despesa ou receber um valor — leva só alguns segundos.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-number">2</div>
+      <div>
+        <div class="step-title">Acompanhe seus relatórios</div>
+        <div class="step-text">Veja para onde seu dinheiro está indo, por categoria e por cartão, sempre atualizado.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-number">3</div>
+      <div>
+        <div class="step-title">Receba sugestões certeiras</div>
+        <div class="step-text">O app te avisa onde dá pra cortar e onde faz sentido investir, direto na tela inicial.</div>
+      </div>
+    </div>
+  </div>
+
+  <button class="cta-btn" onclick="comecar()">Começar a Organizar</button>
+</div>
+
+<script>
+  function comecar() {
+    const nomeDigitado = document.getElementById('inputNomeUsuaria').value.trim();
+    localStorage.setItem('ffjoyce2026_nome_usuaria', nomeDigitado || 'Joyce Pinheiro');
+    localStorage.setItem('ffjoyce2026_isFirstRun', 'false');
+    location.href = 'index.html';
+  }
+</script>
+
+</body>
+</html>

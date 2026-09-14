@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Transações — Finanças Fácil</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/transacoes.css">
+<link rel="stylesheet" href="css/seguranca.css">
+</head>
+<body>
+<script src="js/storage-migracao.js"></script>
+<script src="js/seguranca.js"></script>
+
+<div id="app">
+  <div class="screen">
+    <div class="month" style="margin-top:18px">Transações</div>
+
+    <div class="search-bar">
+      <span>🔍</span>
+      <input type="text" id="buscaInput" placeholder="Buscar por nome, valor ou categoria">
+    </div>
+
+    <div class="filters" id="filtros">
+      <div class="filter-chip active" data-filtro="todas">Todas</div>
+      <div class="filter-chip" data-filtro="cartao">Cartão</div>
+      <div class="filter-chip" data-filtro="dinheiro">Dinheiro / Pix</div>
+      <div class="filter-chip" data-filtro="receitas">Receitas</div>
+      <div class="filter-chip" id="chipPeriodo" onclick="togglePeriodoInput()">Período ▾</div>
+    </div>
+
+    <input type="month" id="periodoInput" class="periodo-input" style="display:none">
+
+    <div id="listaTransacoes"></div>
+  </div>
+
+  <button class="fab" onclick="location.href='index.html'">+</button>
+
+  <div class="tabbar">
+    <a href="index.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⌂</span>Início</a>
+    <div class="tab-item active"><span class="tab-icon">⇄</span>Transações</div>
+    <a href="relatorios.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">◔</span>Relatórios</a>
+    <a href="mais.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⋯</span>Mais</a>
+  </div>
+</div>
+
+<!-- Modal de detalhe / edição / exclusão de transação -->
+<div class="sheet-overlay" id="sheetOverlayDetalhe" onclick="fecharModalDetalheSeClicarFora(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="detalheTitulo">Editar transação</div>
+
+    <div class="field-label">Valor</div>
+    <input type="text" inputmode="numeric" id="detalheValor" class="text-input" placeholder="R$ 0,00">
+
+    <div id="blocoCategoriaDetalhe">
+      <div class="field-label">Categoria</div>
+      <div class="chip-grid" id="detalheCategoriaChips"></div>
+    </div>
+
+    <div id="blocoCartaoDetalhe">
+      <div class="field-label">Cartão (opcional)</div>
+      <div class="chip-grid" id="detalheCartaoChips"></div>
+    </div>
+
+    <div class="field-label">Descrição</div>
+    <input type="text" id="detalheDescricao" class="text-input" placeholder="Descrição (opcional)">
+
+    <button class="save-btn" onclick="salvarEdicaoTransacao()">Salvar alterações</button>
+    <button class="save-btn" style="background:transparent;color:var(--red);border:1px solid var(--red-soft);margin-top:10px" onclick="excluirTransacao()">🗑️ Excluir transação</button>
+  </div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/moeda.js"></script>
+<script src="js/transacoes.js"></script>
+</body>
+</html>

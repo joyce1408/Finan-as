@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Detalhe do Cartão</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/cartoes.css">
+<link rel="stylesheet" href="css/seguranca.css">
+</head>
+<body>
+<script src="js/storage-migracao.js"></script>
+<script src="js/seguranca.js"></script>
+
+<div id="app">
+  <div class="anchor">
+    <div style="display:flex; justify-content:space-between; align-items:center">
+      <div class="back-btn" onclick="location.href='cartoes.html'">←</div>
+      <div class="back-btn" onclick="abrirModalEdicao()">✏️</div>
+    </div>
+    <div class="anchor-bank">
+      <div class="bank-logo" id="bankLogo">—</div>
+      <div class="bank-name-block">
+        <div class="bank-name" id="bankName">—</div>
+        <div class="bank-sub" id="bankSub">—</div>
+      </div>
+    </div>
+    <div class="anchor-value-label">Valor total da fatura atual</div>
+    <div class="anchor-value" id="valorFatura">R$ 0,00</div>
+    <div class="due-chip" id="dueChip">📅 —</div>
+  </div>
+
+  <div class="screen" style="padding-bottom:100px">
+    <div class="limit-card">
+      <div class="limit-top">
+        <span class="limit-label">Limite utilizado</span>
+        <span class="limit-pct" id="limitPct">0%</span>
+      </div>
+      <div class="limit-track"><div class="limit-fill" id="limitFill" style="width:0%"></div></div>
+      <div class="limit-note" id="limitNote">—</div>
+    </div>
+
+    <div class="section-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px">
+      <div class="section-head-title" style="font-size:14px;font-weight:700">Compras deste mês</div>
+      <button class="import-btn" onclick="document.getElementById('inputFatura').click()">📎 Importar fatura</button>
+    </div>
+    <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px">Aceita foto, PDF ou CSV — o app identifica sozinho o tipo de arquivo e lê do jeito certo.</div>
+    <input type="file" id="inputFatura" accept=".pdf,application/pdf,image/*,.csv,text/csv,text/plain,.txt" style="display:none">
+    <div id="progressoOcr" style="display:none"></div>
+    <div id="previewImportacao"></div>
+    <div id="listaCompras"></div>
+  </div>
+
+  <div class="tabbar">
+    <a href="index.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⌂</span>Início</a>
+    <a href="transacoes.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⇄</span>Transações</a>
+    <a href="relatorios.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">◔</span>Relatórios</a>
+    <a href="mais.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⋯</span>Mais</a>
+  </div>
+</div>
+
+<!-- Modal de edição do cartão -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="fecharModalSeClicarFora(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Editar cartão</div>
+
+    <div class="field-label">Nome do banco</div>
+    <input type="text" id="inputNomeCartao" class="text-input" placeholder="Ex.: Nubank, Itaú, C6...">
+
+    <div class="field-label">Limite</div>
+    <input type="text" inputmode="numeric" id="inputLimiteCartao" class="text-input" placeholder="R$ 0,00">
+
+    <div class="field-label">Dia de vencimento da fatura</div>
+    <input type="number" inputmode="numeric" id="inputVencimentoCartao" class="text-input" placeholder="Ex.: 14" min="1" max="31">
+
+    <button class="save-btn" onclick="salvarEdicaoCartao()">Salvar alterações</button>
+    <button class="save-btn" style="background:transparent;color:var(--red);border:1px solid var(--red-soft);margin-top:10px" onclick="excluirCartao()">Excluir cartão</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+</script>
+<script src="js/db.js"></script>
+<script src="js/motor.js"></script>
+<script src="js/moeda.js"></script>
+<script src="js/importar-fatura.js"></script>
+<script src="js/ocr-fatura.js"></script>
+<script src="js/ler-documento.js"></script>
+<script src="js/cartao-detalhe.js"></script>
+</body>
+</html>

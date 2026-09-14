@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Finanças Fácil</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/seguranca.css">
+</head>
+<body>
+<script src="js/storage-migracao.js"></script>
+<script>
+  if (localStorage.getItem('ffjoyce2026_isFirstRun') !== 'false') {
+    location.replace('onboarding.html');
+  }
+</script>
+<script src="js/seguranca.js"></script>
+
+<div id="app">
+  <div class="screen">
+    <div class="header-row-top">
+      <div>
+        <div class="greeting" id="greeting">Olá</div>
+        <div class="month" id="monthLabel">—</div>
+        <div class="motivational-line">Pequenas economias hoje geram grandes conquistas amanhã.</div>
+      </div>
+      <div class="profile-photo" id="profilePhoto" onclick="document.getElementById('inputFotoPerfil').click()">
+        <span id="profilePhotoPlaceholder">👤</span>
+      </div>
+      <input type="file" id="inputFotoPerfil" accept="image/*" style="display:none">
+    </div>
+
+    <div id="calmBanner"></div>
+
+    <div class="balance-card" id="balanceCard">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <div class="balance-label">Saldo do mês</div>
+        <button class="visibility-toggle" id="btnOlhoSaldo" onclick="alternarVisibilidade()" style="color:#fff">👁️‍🗨️</button>
+      </div>
+      <div class="balance-value" id="saldoValor">R$ 0,00</div>
+      <div class="balance-sub">
+        <div class="balance-sub-item" onclick="editarRendaHome()" style="cursor:pointer">
+          <div class="balance-sub-label">Entradas ✏️</div>
+          <div class="balance-sub-value positive" id="entradasValor">R$ 0,00</div>
+        </div>
+        <div class="balance-sub-item">
+          <div class="balance-sub-label">Saídas</div>
+          <div class="balance-sub-value negative" id="saidasValor">R$ 0,00</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="reserva-card">
+      <div>
+        <div class="reserva-card-label">Reserva de emergência</div>
+        <div class="reserva-card-value" id="reservaValor">R$ 0,00</div>
+        <div class="reserva-card-meta" id="reservaMeta">Meta: R$ 0,00</div>
+      </div>
+      <button class="visibility-toggle" id="btnOlhoReserva" onclick="alternarVisibilidade()">👁️‍🗨️</button>
+    </div>
+
+    <div class="section-title">Gastos por categoria</div>
+    <div class="chart-card">
+      <div class="chart-total">
+        <span class="chart-total-label">Total gasto no mês</span>
+        <span class="chart-total-value" id="totalGastoLabel">R$ 0,00</span>
+      </div>
+      <div class="bar-list" id="barList"></div>
+    </div>
+
+    <div class="section-title">Próximos vencimentos</div>
+    <div class="bills-list" id="billsList"></div>
+
+    <div id="avisosBox"></div>
+
+    <div id="insightBox"></div>
+  </div>
+
+  <button class="fab" onclick="abrirModal()">+</button>
+
+  <div class="tabbar">
+    <div class="tab-item active"><span class="tab-icon">⌂</span>Início</div>
+    <a href="transacoes.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⇄</span>Transações</a>
+    <a href="relatorios.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">◔</span>Relatórios</a>
+    <a href="mais.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⋯</span>Mais</a>
+  </div>
+</div>
+
+<!-- Modal de cadastro de despesa -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="fecharModalSeClicarFora(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="type-toggle">
+      <div class="type-option selected" data-tipo="despesa" onclick="alternarTipo('despesa')">Despesa</div>
+      <div class="type-option" data-tipo="receita" onclick="alternarTipo('receita')">Receita</div>
+      <div class="type-option" data-tipo="reserva" onclick="alternarTipo('reserva')">Reserva</div>
+    </div>
+    <div class="sheet-title" id="sheetTitle">Nova despesa</div>
+
+    <input type="text" inputmode="numeric" class="value-input" id="inputValor" placeholder="R$ 0,00" autofocus>
+
+    <div id="camposDespesa">
+      <div class="field-label">Categoria</div>
+      <div class="chip-grid" id="categoriaChips"></div>
+
+      <div class="field-label">Forma de pagamento</div>
+      <div class="chip-grid" id="formaPagamentoChips">
+        <div class="chip selected" data-forma="cartao" onclick="selecionarFormaPagamento('cartao')">💳 Cartão de Crédito</div>
+        <div class="chip" data-forma="debito_automatico" onclick="selecionarFormaPagamento('debito_automatico')">🏦 Débito Automático</div>
+        <div class="chip" data-forma="dinheiro" onclick="selecionarFormaPagamento('dinheiro')">💵 Dinheiro</div>
+        <div class="chip" data-forma="pix" onclick="selecionarFormaPagamento('pix')">⚡ Pix</div>
+        <div class="chip" data-forma="boleto" onclick="selecionarFormaPagamento('boleto')">🧾 Boleto</div>
+      </div>
+
+      <div id="blocoCartaoEscolha">
+        <div class="field-label">Qual cartão?</div>
+        <div class="chip-grid" id="cartaoChips"></div>
+      </div>
+
+      <div class="inline-note" id="alertaCartao" style="display:none"></div>
+    </div>
+
+    <div id="camposReceita" style="display:none">
+      <div class="field-label">Descrição</div>
+      <input type="text" id="inputDescricaoReceita" class="text-input" placeholder="Ex.: Freela, reembolso, bônus...">
+    </div>
+
+    <div id="camposReserva" style="display:none">
+      <div class="inline-note">Esse valor é somado à sua reserva de emergência e aparece na Evolução da Reserva, em Relatórios.</div>
+    </div>
+
+    <button class="save-btn" id="btnSalvar" onclick="salvarDespesa()">Salvar</button>
+  </div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/motor.js"></script>
+<script src="js/moeda.js"></script>
+<script src="js/avisos.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

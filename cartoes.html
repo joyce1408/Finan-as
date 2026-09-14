@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Cartões — Finanças Fácil</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/cartoes.css">
+<link rel="stylesheet" href="css/seguranca.css">
+</head>
+<body>
+<script src="js/storage-migracao.js"></script>
+<script src="js/seguranca.js"></script>
+
+<div id="app">
+  <div class="screen">
+    <div class="month" style="margin-top:18px">Cartões</div>
+    <div id="listaCartoes" style="margin-top:16px"></div>
+    <button class="add-card-btn" onclick="abrirModalCartao()">+ Adicionar cartão</button>
+  </div>
+
+  <div class="tabbar">
+    <a href="index.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⌂</span>Início</a>
+    <a href="transacoes.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⇄</span>Transações</a>
+    <a href="relatorios.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">◔</span>Relatórios</a>
+    <a href="mais.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⋯</span>Mais</a>
+  </div>
+</div>
+
+<!-- Modal de novo cartão -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="fecharModalSeClicarFora(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="sheetTitleCartao">Novo cartão</div>
+
+    <div class="field-label">Nome do banco</div>
+    <input type="text" id="inputNomeCartao" class="text-input" placeholder="Ex.: Nubank, Itaú, C6...">
+
+    <div class="field-label">Limite</div>
+    <input type="text" inputmode="numeric" id="inputLimiteCartao" class="text-input" placeholder="R$ 0,00">
+
+    <div class="field-label">Dia de vencimento da fatura</div>
+    <input type="number" inputmode="numeric" id="inputVencimentoCartao" class="text-input" placeholder="Ex.: 14" min="1" max="31">
+
+    <button class="save-btn" onclick="salvarCartao()">Salvar cartão</button>
+  </div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/motor.js"></script>
+<script src="js/moeda.js"></script>
+<script src="js/cartoes.js"></script>
+</body>
+</html>
