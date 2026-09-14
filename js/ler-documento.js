@@ -132,13 +132,12 @@ function detectarTipoArquivo(arquivo) {
 // (sem isso, palavras como "Farmácia" ou "Débito" nunca seriam lidas certo)
 const WHITELIST_CARACTERES = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZãáàâéêíóôõúüçÃÁÀÂÉÊÍÓÔÕÚÜÇR$,.-/ ";
 
-// Endereços fixos e conhecidos dos arquivos que o Tesseract.js precisa baixar
-// por trás dos panos (worker, núcleo WASM, pacote de idioma). Sem isso, a
-// biblioteca tenta "adivinhar" esses caminhos sozinha a partir de onde o
-// script principal foi carregado — e essa adivinhança pode falhar dependendo
-// do CDN, dando um erro sem mensagem clara.
-const TESSERACT_WORKER_PATH = 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/worker.min.js';
-const TESSERACT_CORE_PATH = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.4/tesseract-core.wasm.js';
+// Endereço fixo do pacote de idioma (arquivo separado do worker/núcleo,
+// hospedado num local estável independente da versão do Tesseract.js usada).
+// NÃO fixamos workerPath/corePath: como vêm do mesmo pacote npm que o script
+// principal, forçar uma versão "por fora" corre o risco de descombinar com
+// a versão real carregada — foi exatamente isso que causou o erro
+// "Cannot read properties of null (reading 'SetVariable')" na tentativa anterior.
 const TESSERACT_LANG_PATH = 'https://tessdata.projectnaptha.com/4.0.0';
 
 // Rótulos amigáveis para cada etapa do carregamento, mostrados na tela
@@ -153,8 +152,6 @@ const ROTULOS_STATUS = {
 
 async function criarWorkerConfigurado(aoProgredir) {
   const worker = await Tesseract.createWorker('por', 1, {
-    workerPath: TESSERACT_WORKER_PATH,
-    corePath: TESSERACT_CORE_PATH,
     langPath: TESSERACT_LANG_PATH,
     logger: (info) => {
       if (!aoProgredir) return;
@@ -168,11 +165,18 @@ async function criarWorkerConfigurado(aoProgredir) {
 
   // PSM 6: assume um único bloco uniforme de texto, lido estritamente linha
   // por linha — evita que o modo automático tente separar em "colunas" e
-  // acabe ignorando a coluna do valor à direita
-  await worker.setParameters({
-    tessedit_pageseg_mode: '6',
-    tessedit_char_whitelist: WHITELIST_CARACTERES
-  });
+  // acabe ignorando a coluna do valor à direita.
+  // Isso fica em try/catch de propósito: se essa chamada falhar (já vimos um
+  // caso de incompatibilidade interna do Tesseract.js), a leitura continua
+  // sem essas otimizações em vez de travar tudo.
+  try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: '6',
+      tessedit_char_whitelist: WHITELIST_CARACTERES
+    });
+  } catch (erro) {
+    console.warn('Não foi possível aplicar PSM/whitelist ao Tesseract — seguindo com a leitura padrão:', erro);
+  }
 
   return worker;
 }
