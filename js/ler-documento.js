@@ -151,7 +151,7 @@ const ROTULOS_STATUS = {
 };
 
 async function criarWorkerConfigurado(aoProgredir) {
-  const worker = await Tesseract.createWorker('por', 1, {
+  const worker = Tesseract.createWorker({
     langPath: TESSERACT_LANG_PATH,
     logger: (info) => {
       if (!aoProgredir) return;
@@ -163,12 +163,19 @@ async function criarWorkerConfigurado(aoProgredir) {
     }
   });
 
+  // API v2: inicialização em etapas separadas (mais antiga, muito mais
+  // testada em produção do que o atalho createWorker(lang) da v4/v5, que
+  // apresentou um bug interno — "Cannot read properties of null (reading
+  // 'SetVariable')" — nesta rede/navegador)
+  await worker.load();
+  await worker.loadLanguage('por');
+  await worker.initialize('por');
+
   // PSM 6: assume um único bloco uniforme de texto, lido estritamente linha
   // por linha — evita que o modo automático tente separar em "colunas" e
   // acabe ignorando a coluna do valor à direita.
-  // Isso fica em try/catch de propósito: se essa chamada falhar (já vimos um
-  // caso de incompatibilidade interna do Tesseract.js), a leitura continua
-  // sem essas otimizações em vez de travar tudo.
+  // Fica em try/catch por segurança: se essa etapa específica falhar, a
+  // leitura continua sem essas otimizações em vez de travar tudo.
   try {
     await worker.setParameters({
       tessedit_pageseg_mode: '6',
