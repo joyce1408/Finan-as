@@ -1,0 +1,24 @@
+/* Estilos específicos da tela Mais — complementa css/style.css */
+
+.page-title { font-size: 22px; font-weight: 700; margin-top: 8px; margin-bottom: 18px; }
+
+.profile-card { background: var(--blue); border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 14px; color: #fff; margin-bottom: 22px; }
+.avatar { width: 48px; height: 48px; border-radius: 50%; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; flex-shrink: 0; }
+.profile-name { font-size: 15px; font-weight: 700; }
+.profile-sub { font-size: 11.5px; color: rgba(255,255,255,0.6); margin-top: 2px; }
+
+.group-title { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); margin: 20px 4px 10px; }
+.menu-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.menu-item { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--border); }
+.menu-item:last-child { border-bottom: none; }
+.menu-item.clickable { cursor: pointer; }
+.menu-icon { width: 32px; height: 32px; border-radius: 9px; background: #fff; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.menu-label { flex: 1; font-size: 13.5px; font-weight: 500; }
+.menu-value { font-size: 12px; color: var(--ink-soft); margin-right: 4px; }
+.menu-chevron { font-size: 12px; color: var(--ink-soft); }
+.toggle { width: 42px; height: 24px; border-radius: 14px; background: var(--border); position: relative; flex-shrink: 0; }
+.toggle.on { background: var(--green); }
+.toggle::after { content: ''; width: 19px; height: 19px; border-radius: 50%; background: #fff; position: absolute; top: 2.5px; left: 2.5px; transition: left 0.2s ease; }
+.toggle.on::after { left: 20.5px; }
+.danger-text { color: var(--red); }
+.app-version { text-align: center; font-size: 11px; color: var(--ink-soft); margin-top: 22px; }
