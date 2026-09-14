@@ -175,16 +175,25 @@ async function extrairTextoDoDocumento(arquivo, aoProgredir) {
     try {
       canvases = [await carregarImagemEmCanvas(arquivo)];
     } catch (erro) {
-      throw new Error('Não consegui abrir essa imagem. Confira se o arquivo não está corrompido e tente outra foto.');
+      console.error('Falha ao carregar imagem em canvas:', erro);
+      const detalhe = (erro && erro.message) ? erro.message : (erro && erro.type) || 'erro desconhecido ao carregar a imagem';
+      throw new Error(`Não consegui abrir essa imagem. Detalhe técnico: "${detalhe}". Confira se o arquivo não está corrompido e tente outra foto.`);
     }
   } else {
     throw new Error('Tipo de arquivo não suportado para OCR (use PDF ou imagem).');
   }
 
   let ultimoProgressoPagina = 0;
-  const worker = await criarWorkerConfigurado((progressoPagina) => {
-    ultimoProgressoPagina = progressoPagina;
-  });
+  let worker;
+  try {
+    worker = await criarWorkerConfigurado((progressoPagina) => {
+      ultimoProgressoPagina = progressoPagina;
+    });
+  } catch (erro) {
+    console.error('Falha ao criar/configurar o worker do Tesseract:', erro);
+    const detalhe = (erro && erro.message) ? erro.message : 'erro desconhecido';
+    throw new Error(`Não consegui carregar o motor de leitura de texto (isso baixa um pacote de ~1-2MB na primeira vez). Detalhe técnico: "${detalhe}". Confira sua conexão com a internet — redes de empresa às vezes bloqueiam esse tipo de download — e tente de novo.`);
+  }
 
   let textoCompleto = '';
 
