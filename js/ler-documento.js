@@ -96,7 +96,7 @@ async function renderizarPaginasPdf(arquivo, aoRenderizarPagina) {
       pdf = await tentarCarregarPdf(bufferArquivo, true);
     } catch (segundoErro) {
       console.error('PDF.js falhou também sem worker:', segundoErro);
-      const detalheTecnico = (segundoErro && segundoErro.message) || (primeiroErro && primeiroErro.message) || 'erro desconhecido';
+      const detalheTecnico = descreverErro(segundoErro) !== 'erro desconhecido (nenhum detalhe fornecido)' ? descreverErro(segundoErro) : descreverErro(primeiroErro);
       throw new Error(`Não consegui abrir esse PDF. Detalhe técnico: "${detalheTecnico}". Tente reexportar a fatura ou importar como foto/CSV.`);
     }
   }
@@ -132,11 +132,36 @@ function detectarTipoArquivo(arquivo) {
 // (sem isso, palavras como "Farmácia" ou "Débito" nunca seriam lidas certo)
 const WHITELIST_CARACTERES = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZãáàâéêíóôõúüçÃÁÀÂÉÊÍÓÔÕÚÜÇR$,.-/ ";
 
+// Endereços fixos e conhecidos dos arquivos que o Tesseract.js precisa baixar
+// por trás dos panos (worker, núcleo WASM, pacote de idioma). Sem isso, a
+// biblioteca tenta "adivinhar" esses caminhos sozinha a partir de onde o
+// script principal foi carregado — e essa adivinhança pode falhar dependendo
+// do CDN, dando um erro sem mensagem clara.
+const TESSERACT_WORKER_PATH = 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/worker.min.js';
+const TESSERACT_CORE_PATH = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.4/tesseract-core.wasm.js';
+const TESSERACT_LANG_PATH = 'https://tessdata.projectnaptha.com/4.0.0';
+
+// Rótulos amigáveis para cada etapa do carregamento, mostrados na tela
+// enquanto os arquivos são baixados/preparados
+const ROTULOS_STATUS = {
+  'loading tesseract core': 'Baixando o motor de OCR...',
+  'initializing tesseract': 'Preparando o motor de OCR...',
+  'loading language traineddata': 'Baixando o pacote de português...',
+  'initializing api': 'Quase lá...',
+  'recognizing text': 'Lendo o texto...'
+};
+
 async function criarWorkerConfigurado(aoProgredir) {
   const worker = await Tesseract.createWorker('por', 1, {
+    workerPath: TESSERACT_WORKER_PATH,
+    corePath: TESSERACT_CORE_PATH,
+    langPath: TESSERACT_LANG_PATH,
     logger: (info) => {
-      if (aoProgredir && info.status === 'recognizing text') {
-        aoProgredir(info.progress);
+      if (!aoProgredir) return;
+      if (info.status === 'recognizing text') {
+        aoProgredir(info.progress, info.status);
+      } else if (ROTULOS_STATUS[info.status]) {
+        aoProgredir(info.progress || 0, info.status);
       }
     }
   });
@@ -159,6 +184,20 @@ async function criarWorkerConfigurado(aoProgredir) {
  * `aoProgredir(mensagem, percentual)` é chamado durante o processo, pra tela
  * mostrar uma barra de progresso.
  */
+// Extrai uma descrição legível de qualquer formato de erro (Error, string,
+// objeto genérico, evento) — evita cair em "erro desconhecido" sem pista
+function descreverErro(erro) {
+  if (!erro) return 'erro desconhecido (nenhum detalhe fornecido)';
+  if (typeof erro === 'string') return erro;
+  if (erro.message) return erro.message;
+  if (erro.type) return `evento de erro: ${erro.type}`;
+  try {
+    const texto = JSON.stringify(erro);
+    if (texto && texto !== '{}') return texto;
+  } catch (e) { /* ignora */ }
+  return String(erro);
+}
+
 async function extrairTextoDoDocumento(arquivo, aoProgredir) {
   const tipo = detectarTipoArquivo(arquivo);
   const notificar = (msg, pct) => { if (aoProgredir) aoProgredir(msg, pct); };
@@ -176,8 +215,7 @@ async function extrairTextoDoDocumento(arquivo, aoProgredir) {
       canvases = [await carregarImagemEmCanvas(arquivo)];
     } catch (erro) {
       console.error('Falha ao carregar imagem em canvas:', erro);
-      const detalhe = (erro && erro.message) ? erro.message : (erro && erro.type) || 'erro desconhecido ao carregar a imagem';
-      throw new Error(`Não consegui abrir essa imagem. Detalhe técnico: "${detalhe}". Confira se o arquivo não está corrompido e tente outra foto.`);
+      throw new Error(`Não consegui abrir essa imagem. Detalhe técnico: "${descreverErro(erro)}". Confira se o arquivo não está corrompido e tente outra foto.`);
     }
   } else {
     throw new Error('Tipo de arquivo não suportado para OCR (use PDF ou imagem).');
@@ -186,13 +224,17 @@ async function extrairTextoDoDocumento(arquivo, aoProgredir) {
   let ultimoProgressoPagina = 0;
   let worker;
   try {
-    worker = await criarWorkerConfigurado((progressoPagina) => {
-      ultimoProgressoPagina = progressoPagina;
+    worker = await criarWorkerConfigurado((progresso, status) => {
+      if (status === 'recognizing text') {
+        ultimoProgressoPagina = progresso;
+        return;
+      }
+      const rotulo = ROTULOS_STATUS[status] || 'Preparando...';
+      notificar(`${rotulo}${progresso ? ' ' + Math.round(progresso * 100) + '%' : ''}`, progresso ? progresso * 30 : 5);
     });
   } catch (erro) {
     console.error('Falha ao criar/configurar o worker do Tesseract:', erro);
-    const detalhe = (erro && erro.message) ? erro.message : 'erro desconhecido';
-    throw new Error(`Não consegui carregar o motor de leitura de texto (isso baixa um pacote de ~1-2MB na primeira vez). Detalhe técnico: "${detalhe}". Confira sua conexão com a internet — redes de empresa às vezes bloqueiam esse tipo de download — e tente de novo.`);
+    throw new Error(`Não consegui carregar o motor de leitura de texto (isso baixa um pacote de ~1-2MB na primeira vez). Detalhe técnico: "${descreverErro(erro)}". Confira sua conexão com a internet e tente de novo.`);
   }
 
   let textoCompleto = '';
