@@ -440,6 +440,30 @@ async function houveDespesaHoje() {
   });
 }
 
+// Remove despesas duplicadas (mesmo valor, data, descrição, cartão e
+// categoria) — útil quando uma importação acaba rodando duas vezes.
+// Mantém sempre a primeira ocorrência de cada uma.
+async function removerDespesasDuplicadas() {
+  const despesas = await listarTodos('despesa');
+  const vistos = new Map();
+  const idsParaRemover = [];
+
+  for (const d of despesas) {
+    const chave = [d.valor, d.data, d.descricao, d.cartaoId, d.categoriaId, d.parcelaAtual, d.parcelaTotal].join('|');
+    if (vistos.has(chave)) {
+      idsParaRemover.push(d.id);
+    } else {
+      vistos.set(chave, d.id);
+    }
+  }
+
+  for (const id of idsParaRemover) {
+    await remover('despesa', id);
+  }
+
+  return idsParaRemover.length;
+}
+
 window.DB = {
   abrirBanco, fecharBanco, apagarBancoCompleto, limparStore, seedInicial, adicionar, listarTodos, obterPorId, atualizar, remover,
   gastosDoMes, gastosPorCategoria, totalGastoNoMes, gastosDiariosDoMes, parcelasProximoMes,
@@ -447,5 +471,5 @@ window.DB = {
   proximasFaturas, valorFaturaCartao, cartoesComResumo,
   mesAtualISO, mesAnteriorISO, despesasDetalhadas, totalDespesasEntre, houveDespesaHoje,
   adicionarAporte, historicoAportes, despesasAVistaDoMes, faturaDevidaNoMes, faturasVencendoNoMes, saldoDisponivelDoMes,
-  despesasDoCicloFatura
+  despesasDoCicloFatura, removerDespesasDuplicadas
 };

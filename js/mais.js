@@ -64,6 +64,19 @@ function removerFotoPerfil() {
   alert('Foto removida.');
 }
 
+async function removerDuplicatas() {
+  const ok = confirm('Isso procura despesas idênticas (mesmo valor, data, descrição e cartão) e apaga as cópias repetidas, mantendo só uma de cada. Útil quando uma importação de fatura acaba rodando duas vezes. Continuar?');
+  if (!ok) return;
+
+  const quantidade = await DB.removerDespesasDuplicadas();
+  if (quantidade === 0) {
+    alert('Nenhuma duplicata encontrada — está tudo certo.');
+  } else {
+    alert(`${quantidade} despesa(s) duplicada(s) removida(s).`);
+  }
+  await renderMais();
+}
+
 async function limparDespesasExemplo() {
   const ok = confirm('Isso vai apagar TODAS as despesas cadastradas (inclusive as de exemplo que vieram com o app), pra você começar a lançar as suas de verdade. Seus cartões, categorias e renda continuam como estão. Deseja continuar?');
   if (!ok) return;
