@@ -20,6 +20,8 @@ function getIdDaUrl() {
   return parseInt(params.get('id'), 10);
 }
 
+let limiteCartaoAtual = 0; // cache pra calcular a prévia sem salvar nada ainda
+
 async function iniciar() {
   await DB.abrirBanco();
   await DB.seedInicial();
@@ -44,6 +46,7 @@ async function iniciar() {
 
   const valorFatura = await DB.valorFaturaCartao(id);
   document.getElementById('valorFatura').textContent = formatarMoeda(valorFatura);
+  limiteCartaoAtual = cartao.limite;
 
   const hoje = new Date();
   let vencimento = new Date(hoje.getFullYear(), hoje.getMonth(), cartao.diaVencimento);
@@ -192,6 +195,9 @@ function cancelarImportacao() {
   itensParaImportar = [];
   valorTotalFaturaDetectado = null;
   document.getElementById('previewImportacao').innerHTML = '';
+  document.getElementById('valorFatura').style.opacity = '1';
+  document.getElementById('limitFill').style.opacity = '1';
+  iniciar(); // restaura os valores reais no card e na barra (a prévia não foi salva)
 }
 
 async function confirmarImportacao() {
@@ -229,12 +235,33 @@ async function confirmarImportacao() {
     }
   }
 
-  cancelarImportacao();
-  await iniciar(); // recarrega fatura, limite e lista de compras com os novos dados
+  itensParaImportar = [];
+  valorTotalFaturaDetectado = null;
+  window.location.reload(); // recarrega tudo do zero: fatura, limite, lista de compras, avisos
 }
 
 // ---------- Leitura de fatura por foto/PDF (OCR local via Tesseract.js + PDF.js) ----------
 // (o disparo agora acontece pelo roteador único do input #inputFatura, acima)
+
+// Mostra no card azul e na barra de limite uma PRÉVIA do valor total antes
+// de confirmar a importação — deixa claro que ainda não foi salvo, pra não
+// parecer que já importou se a usuária sair da tela sem confirmar.
+function mostrarPreviaFatura(valorPrevia) {
+  const valorAtual = document.getElementById('valorFatura');
+  valorAtual.textContent = `${formatarMoeda(valorPrevia)} (prévia)`;
+  valorAtual.style.opacity = '0.75';
+
+  if (limiteCartaoAtual > 0) {
+    const percentual = (valorPrevia / limiteCartaoAtual) * 100;
+    const status = Motor.statusLimite(percentual);
+    const corBarra = status === 'ok' ? 'var(--green)' : status === 'warn' ? 'var(--amber)' : 'var(--red)';
+
+    document.getElementById('limitPct').textContent = `${percentual.toFixed(0)}% (prévia)`;
+    document.getElementById('limitFill').style.width = `${Math.min(percentual, 100).toFixed(0)}%`;
+    document.getElementById('limitFill').style.background = corBarra;
+    document.getElementById('limitFill').style.opacity = '0.6';
+  }
+}
 
 function renderPreviewOcr(parse) {
   itensParaImportar = parse.validos;
@@ -242,6 +269,8 @@ function renderPreviewOcr(parse) {
 
   const totalImportar = parse.validos.reduce((s, i) => s + i.valor, 0);
   const diferenca = valorTotalFaturaDetectado !== null ? valorTotalFaturaDetectado - totalImportar : null;
+  const totalComAjuste = diferenca !== null && diferenca > 0.01 ? totalImportar + diferenca : totalImportar;
+  mostrarPreviaFatura(totalComAjuste);
 
   box.innerHTML = `
     <div class="import-preview">
