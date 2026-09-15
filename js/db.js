@@ -212,13 +212,27 @@ async function despesasDetalhadas() {
 }
 
 async function gastosPorCategoria(mesISO = mesAtualISO()) {
-  const despesas = await gastosDoMes(mesISO);
   const categorias = await listarTodos('categoria');
   const mapa = {};
-
   categorias.forEach((c) => { mapa[c.id] = { ...c, total: 0, itens: [] }; });
 
-  despesas.forEach((d) => {
+  // Despesas à vista (Pix/Dinheiro/Débito) — mês calendário puro, já que não
+  // têm ciclo de fechamento
+  const todasDespesas = await listarTodos('despesa');
+  const despesasAVista = todasDespesas.filter((d) => !d.cartaoId && d.data.slice(0, 7) === mesISO);
+
+  // Despesas no cartão — pelo CICLO de fechamento de cada cartão, não pelo
+  // mês calendário. Isso garante que "Total gasto no mês" sempre bate com o
+  // valor da fatura que está vencendo, em vez de ficar cortado no meio.
+  const cartoes = await listarTodos('cartao');
+  let despesasDeCartao = [];
+  for (const c of cartoes) {
+    despesasDeCartao = despesasDeCartao.concat(await despesasDoCicloFatura(c.id, mesISO));
+  }
+
+  const todasRelevantes = [...despesasAVista, ...despesasDeCartao];
+
+  todasRelevantes.forEach((d) => {
     const parcela = d.valor / (d.parcelaTotal || 1);
     if (mapa[d.categoriaId]) {
       mapa[d.categoriaId].total += parcela;
@@ -230,8 +244,8 @@ async function gastosPorCategoria(mesISO = mesAtualISO()) {
 }
 
 async function totalGastoNoMes(mesISO = mesAtualISO()) {
-  const despesas = await gastosDoMes(mesISO);
-  return despesas.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
+  const categorias = await gastosPorCategoria(mesISO);
+  return categorias.reduce((soma, c) => soma + c.total, 0);
 }
 
 async function gastosDiariosDoMes(mesISO = mesAtualISO()) {
