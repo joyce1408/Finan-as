@@ -278,6 +278,7 @@ async function abrirModal() {
   categoriaSelecionadaId = null;
   cartaoSelecionadoId = null;
   formaPagamentoSelecionada = 'cartao';
+  document.getElementById('inputDataDespesa').value = new Date().toISOString().slice(0, 10);
   document.getElementById('inputValor').value = '';
   document.getElementById('inputDescricaoReceita').value = '';
   document.getElementById('alertaCartao').style.display = 'none';
@@ -390,12 +391,16 @@ async function salvarDespesa() {
     return;
   }
 
+  const dataEscolhida = document.getElementById('inputDataDespesa').value; // formato "AAAA-MM-DD"
+  const [ano, mes, dia] = dataEscolhida.split('-').map(Number);
+  const dataFinal = dataEscolhida ? new Date(ano, mes - 1, dia).toISOString() : new Date().toISOString();
+
   await DB.adicionar('despesa', {
     valor,
     categoriaId: categoriaSelecionadaId,
     cartaoId: formaPagamentoSelecionada === 'cartao' ? cartaoSelecionadoId : null,
     formaPagamento: formaPagamentoSelecionada,
-    data: new Date().toISOString(),
+    data: dataFinal,
     parcelaAtual: 1,
     parcelaTotal: 1,
     descricao: ''

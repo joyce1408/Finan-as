@@ -182,6 +182,7 @@ async function abrirDetalheTransacao(id, tipo) {
 
     document.getElementById('blocoCategoriaDetalhe').style.display = 'block';
     document.getElementById('blocoCartaoDetalhe').style.display = 'block';
+    document.getElementById('detalheData').value = registro.data.slice(0, 10);
   } else {
     const registro = await DB.obterPorId('receita', id);
     document.getElementById('detalheTitulo').textContent = 'Editar receita';
@@ -191,6 +192,7 @@ async function abrirDetalheTransacao(id, tipo) {
     document.getElementById('detalheDescricao').placeholder = 'Descrição';
     document.getElementById('blocoCategoriaDetalhe').style.display = 'none';
     document.getElementById('blocoCartaoDetalhe').style.display = 'none';
+    document.getElementById('detalheData').value = registro.data.slice(0, 10);
   }
 
   document.getElementById('sheetOverlayDetalhe').classList.add('open');
@@ -232,6 +234,10 @@ async function salvarEdicaoTransacao() {
 
   const descricao = document.getElementById('detalheDescricao').value.trim();
 
+  const dataEscolhida = document.getElementById('detalheData').value; // "AAAA-MM-DD"
+  const [ano, mes, dia] = dataEscolhida.split('-').map(Number);
+  const dataFinal = new Date(ano, mes - 1, dia).toISOString();
+
   if (transacaoEmEdicao.tipo === 'despesa') {
     const categoriaId = Number(document.getElementById('detalheCategoriaChips').dataset.selecionado);
     const cartaoTexto = document.getElementById('detalheCartaoChips').dataset.selecionado;
@@ -240,10 +246,10 @@ async function salvarEdicaoTransacao() {
     if (!categoriaId) { alert('Escolha uma categoria.'); return; }
 
     const registro = await DB.obterPorId('despesa', transacaoEmEdicao.id);
-    await DB.atualizar('despesa', { ...registro, valor, descricao, categoriaId, cartaoId });
+    await DB.atualizar('despesa', { ...registro, valor, descricao, categoriaId, cartaoId, data: dataFinal });
   } else {
     const registro = await DB.obterPorId('receita', transacaoEmEdicao.id);
-    await DB.atualizar('receita', { ...registro, valor, descricao: descricao || 'Receita avulsa' });
+    await DB.atualizar('receita', { ...registro, valor, descricao: descricao || 'Receita avulsa', data: dataFinal });
   }
 
   fecharModalDetalhe();
