@@ -307,7 +307,8 @@ async function cartoesComResumo() {
   const cartoes = await listarTodos('cartao');
   const resultado = [];
   for (const c of cartoes) {
-    const valorFatura = await valorFaturaCartao(c.id);
+    const despesasDoCiclo = await despesasDoCicloFatura(c.id);
+    const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
     const percentualUsado = c.limite > 0 ? (valorFatura / c.limite) * 100 : 0;
     resultado.push({ ...c, valorFatura, percentualUsado });
   }

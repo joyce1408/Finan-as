@@ -98,7 +98,8 @@ async function renderHome() {
   billsList.innerHTML = '';
 
   for (const f of faturas.slice(0, 3)) {
-    const valorFatura = await DB.valorFaturaCartao(f.id);
+    const despesasDoCiclo = await DB.despesasDoCicloFatura(f.id);
+    const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
     const tag = f.diasRestantes <= 5
       ? { classe: 'tag-urgent', texto: 'Vence logo' }
       : f.diasRestantes <= 12
@@ -345,7 +346,8 @@ async function selecionarCartao(id) {
 
   const alertaBox = document.getElementById('alertaCartao');
   if (cartaoSelecionadoId) {
-    const valorAtual = await DB.valorFaturaCartao(cartaoSelecionadoId);
+    const despesasDoCicloSelecionado = await DB.despesasDoCicloFatura(cartaoSelecionadoId);
+    const valorAtual = despesasDoCicloSelecionado.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
     const renda = await DB.rendaAtual();
     const avaliacao = Motor.avaliarComprometimentoCartao(valorAtual, renda);
     alertaBox.style.display = 'block';
