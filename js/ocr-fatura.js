@@ -111,9 +111,28 @@ function parseTextoOCR(textoBruto) {
   return { validos, ignoradas };
 }
 
+// Procura o valor TOTAL da fatura no texto (não uma compra individual).
+// A ordem importa: faturas costumam ter vários "Total" (subtotal por pessoa,
+// por categoria, etc.) — tentamos do rótulo mais específico (total geral)
+// pro mais genérico, pra não pegar um subtotal por engano.
+function extrairValorTotal(texto) {
+  const padroes = [
+    /Total\s+da\s+Fatura\s*R?\$?\s*(-?\d{1,3}(?:\.\d{3})*,\d{2})/i,
+    /Valor\s+a\s+Pagar\s*R?\$?\s*(-?\d{1,3}(?:\.\d{3})*,\d{2})/i,
+    /Valor\s+Total\s*R?\$?\s*(-?\d{1,3}(?:\.\d{3})*,\d{2})/i,
+    /\bTotal\s*R?\$?\s*(-?\d{1,3}(?:\.\d{3})*,\d{2})/i
+  ];
+
+  for (const padrao of padroes) {
+    const m = texto.match(padrao);
+    if (m) return parseFloat(m[1].replace(/\./g, '').replace(',', '.'));
+  }
+  return null;
+}
+
 if (typeof window !== 'undefined') {
-  window.OcrFatura = { parseTextoOCR, extrairData, extrairValor, detectarAnoDeReferencia };
+  window.OcrFatura = { parseTextoOCR, extrairData, extrairValor, detectarAnoDeReferencia, extrairValorTotal };
 }
 if (typeof module !== 'undefined') {
-  module.exports = { parseTextoOCR, extrairData, extrairValor, detectarAnoDeReferencia };
+  module.exports = { parseTextoOCR, extrairData, extrairValor, detectarAnoDeReferencia, extrairValorTotal };
 }

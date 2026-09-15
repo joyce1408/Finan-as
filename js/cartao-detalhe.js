@@ -95,6 +95,7 @@ iniciar();
 // ---------- Importação unificada de fatura (foto, PDF ou CSV) ----------
 
 let itensParaImportar = [];
+let valorTotalFaturaDetectado = null;
 let idCartaoAtual = null;
 let idCategoriaOutros = null;
 
@@ -110,6 +111,7 @@ document.getElementById('inputFatura').addEventListener('change', async (e) => {
   idCategoriaOutros = outros ? outros.id : (categorias[0] ? categorias[0].id : null);
 
   if (tipo === 'csv') {
+    valorTotalFaturaDetectado = null;
     const texto = await arquivo.text();
     const resultado = ImportarFatura.parseFaturaCsv(texto);
     itensParaImportar = resultado.validos;
@@ -142,6 +144,7 @@ async function processarComOcr(arquivo, tipo) {
     });
 
     const parse = OcrFatura.parseTextoOCR(texto);
+    valorTotalFaturaDetectado = OcrFatura.extrairValorTotal(texto);
     progresso.style.display = 'none';
     progresso.innerHTML = '';
     renderPreviewOcr(parse);
@@ -187,10 +190,13 @@ function renderPreviewImportacao(resultado) {
 
 function cancelarImportacao() {
   itensParaImportar = [];
+  valorTotalFaturaDetectado = null;
   document.getElementById('previewImportacao').innerHTML = '';
 }
 
 async function confirmarImportacao() {
+  const totalImportado = itensParaImportar.reduce((s, i) => s + i.valor, 0);
+
   for (const item of itensParaImportar) {
     await DB.adicionar('despesa', {
       valor: item.valor,
@@ -202,6 +208,27 @@ async function confirmarImportacao() {
       descricao: item.descricao
     });
   }
+
+  // Regra do Valor Total de Segurança: se identificamos o total real da
+  // fatura no texto (via OCR) e ele é maior que a soma das compras que
+  // conseguimos reconhecer linha por linha, lança a diferença como um
+  // ajuste — garante que a fatura na tela bate com o valor real do banco
+  // mesmo quando o OCR pula alguma linha.
+  if (valorTotalFaturaDetectado !== null) {
+    const diferenca = valorTotalFaturaDetectado - totalImportado;
+    if (diferenca > 0.01) {
+      await DB.adicionar('despesa', {
+        valor: diferenca,
+        categoriaId: idCategoriaOutros,
+        cartaoId: idCartaoAtual,
+        data: new Date().toISOString(),
+        parcelaAtual: 1,
+        parcelaTotal: 1,
+        descricao: 'Outros Gastos da Fatura (Ajuste OCR)'
+      });
+    }
+  }
+
   cancelarImportacao();
   await iniciar(); // recarrega fatura, limite e lista de compras com os novos dados
 }
@@ -214,11 +241,18 @@ function renderPreviewOcr(parse) {
   const box = document.getElementById('previewImportacao');
 
   const totalImportar = parse.validos.reduce((s, i) => s + i.valor, 0);
+  const diferenca = valorTotalFaturaDetectado !== null ? valorTotalFaturaDetectado - totalImportar : null;
 
   box.innerHTML = `
     <div class="import-preview">
       <div class="import-preview-title">${parse.validos.length} compras reconhecidas — ${formatarMoeda(totalImportar)}</div>
       ${parse.ignoradas.length > 0 ? `<div class="import-preview-sub erro">${parse.ignoradas.length} linha(s) da imagem não foram reconhecidas — confira se não falta nada e cadastre manualmente se precisar</div>` : `<div class="import-preview-sub">Confira antes de confirmar — leitura por foto pode errar</div>`}
+      ${valorTotalFaturaDetectado !== null ? `
+        <div class="import-preview-sub" style="color:var(--blue);font-weight:600">
+          Total da fatura identificado: ${formatarMoeda(valorTotalFaturaDetectado)}
+          ${diferenca > 0.01 ? ` — diferença de ${formatarMoeda(diferenca)} será lançada como "Outros Gastos da Fatura (Ajuste OCR)"` : ' — bateu certinho com as compras reconhecidas'}
+        </div>
+      ` : ''}
       <div class="import-item-list">
         ${parse.validos.map((item, i) => `
           <div class="import-item">
