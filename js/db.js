@@ -359,6 +359,28 @@ async function despesasAVistaDoMes(mesISO = mesAtualISO()) {
 // paga, considerando o dia de fechamento: compra feita ATÉ o fechamento cai
 // na fatura deste mesmo mês; compra feita DEPOIS do fechamento cai na fatura
 // do mês seguinte (é assim que cartão de crédito de verdade funciona).
+// Retorna as DESPESAS (não só a soma) que pertencem ao ciclo de fatura de um
+// cartão — mesma regra de faturaDevidaNoMes, mas devolvendo os registros
+// completos, pra telas que precisam listar item por item.
+async function despesasDoCicloFatura(cartaoId, mesISO = mesAtualISO()) {
+  const cartao = await obterPorId('cartao', cartaoId);
+  if (!cartao) return [];
+
+  const todas = await listarTodos('despesa');
+  const [ano, mes] = mesISO.split('-').map(Number);
+  const mesAnteriorData = new Date(ano, mes - 2, 1);
+  const chaveAnterior = `${mesAnteriorData.getFullYear()}-${String(mesAnteriorData.getMonth() + 1).padStart(2, '0')}`;
+
+  return todas.filter((d) => {
+    if (d.cartaoId !== cartaoId) return false;
+    const dia = new Date(d.data).getDate();
+    const chaveDaDespesa = d.data.slice(0, 7);
+    if (chaveDaDespesa === mesISO && dia <= cartao.diaFechamento) return true;
+    if (chaveDaDespesa === chaveAnterior && dia > cartao.diaFechamento) return true;
+    return false;
+  });
+}
+
 async function faturaDevidaNoMes(cartaoId, mesISO) {
   const cartao = await obterPorId('cartao', cartaoId);
   if (!cartao) return 0;
@@ -424,5 +446,6 @@ window.DB = {
   rendaAtual, receitasDoMes, totalReceitasAvulsasNoMes, entradasTotaisDoMes,
   proximasFaturas, valorFaturaCartao, cartoesComResumo,
   mesAtualISO, mesAnteriorISO, despesasDetalhadas, totalDespesasEntre, houveDespesaHoje,
-  adicionarAporte, historicoAportes, despesasAVistaDoMes, faturaDevidaNoMes, faturasVencendoNoMes, saldoDisponivelDoMes
+  adicionarAporte, historicoAportes, despesasAVistaDoMes, faturaDevidaNoMes, faturasVencendoNoMes, saldoDisponivelDoMes,
+  despesasDoCicloFatura
 };

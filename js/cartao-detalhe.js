@@ -44,7 +44,8 @@ async function iniciar() {
   document.getElementById('bankName').textContent = cartao.nome;
   document.getElementById('bankSub').textContent = `Fecha dia ${cartao.diaFechamento} · vence dia ${cartao.diaVencimento}`;
 
-  const valorFatura = await DB.valorFaturaCartao(id);
+  const despesasDoCiclo = await DB.despesasDoCicloFatura(id);
+  const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
   document.getElementById('valorFatura').textContent = formatarMoeda(valorFatura);
   limiteCartaoAtual = cartao.limite;
 
@@ -73,12 +74,20 @@ async function iniciar() {
       : `${formatarMoeda(valorFatura)} usados de ${formatarMoeda(cartao.limite)} · dentro do limite seguro.`;
   document.getElementById('limitNote').textContent = nota;
 
-  const despesas = await DB.despesasDetalhadas();
-  const compras = despesas.filter((d) => d.cartaoId === id && d.data.slice(0, 7) === DB.mesAtualISO());
+  const categorias = await DB.listarTodos('categoria');
+  const mapaCategoria = Object.fromEntries(categorias.map((c) => [c.id, c]));
+  const compras = despesasDoCiclo
+    .map((d) => ({
+      ...d,
+      categoriaIcone: mapaCategoria[d.categoriaId]?.icone || '💰',
+      categoriaNome: mapaCategoria[d.categoriaId]?.nome || 'Outros',
+      valorParcela: d.valor / (d.parcelaTotal || 1)
+    }))
+    .sort((a, b) => new Date(b.data) - new Date(a.data));
   const listaCompras = document.getElementById('listaCompras');
 
   if (compras.length === 0) {
-    listaCompras.innerHTML = `<div style="text-align:center;padding:30px 0;color:var(--ink-soft);font-size:13px">Nenhuma compra neste cartão este mês.</div>`;
+    listaCompras.innerHTML = `<div style="text-align:center;padding:30px 0;color:var(--ink-soft);font-size:13px">Nenhuma compra nesta fatura ainda.</div>`;
   } else {
     listaCompras.innerHTML = compras.map((c) => `
       <div class="purchase-card">
@@ -223,11 +232,18 @@ async function confirmarImportacao() {
   if (valorTotalFaturaDetectado !== null) {
     const diferenca = valorTotalFaturaDetectado - totalImportado;
     if (diferenca > 0.01) {
+      // Usa a MAIOR data entre os itens importados (não "hoje") — assim o
+      // ajuste cai garantidamente no mesmo ciclo de fatura das compras que
+      // ele está compensando, em vez de vazar pro ciclo do mês seguinte
+      const dataDoAjuste = itensParaImportar.length > 0
+        ? itensParaImportar.reduce((maisRecente, item) => item.data > maisRecente ? item.data : maisRecente, itensParaImportar[0].data)
+        : new Date().toISOString();
+
       await DB.adicionar('despesa', {
         valor: diferenca,
         categoriaId: idCategoriaOutros,
         cartaoId: idCartaoAtual,
-        data: new Date().toISOString(),
+        data: dataDoAjuste,
         parcelaAtual: 1,
         parcelaTotal: 1,
         descricao: 'Outros Gastos da Fatura (Ajuste OCR)'
