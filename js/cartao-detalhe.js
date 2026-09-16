@@ -76,25 +76,30 @@ async function iniciar() {
 
   const categorias = await DB.listarTodos('categoria');
   const mapaCategoria = Object.fromEntries(categorias.map((c) => [c.id, c]));
-  const compras = despesasDoCiclo
+  const idsDoCicloAtual = new Set(despesasDoCiclo.map((d) => d.id));
+
+  const todasDespesas = await DB.listarTodos('despesa');
+  const compras = todasDespesas
+    .filter((d) => d.cartaoId === id)
     .map((d) => ({
       ...d,
       categoriaIcone: mapaCategoria[d.categoriaId]?.icone || '💰',
       categoriaNome: mapaCategoria[d.categoriaId]?.nome || 'Outros',
-      valorParcela: d.valor / (d.parcelaTotal || 1)
+      valorParcela: d.valor / (d.parcelaTotal || 1),
+      noCicloAtual: idsDoCicloAtual.has(d.id)
     }))
     .sort((a, b) => new Date(b.data) - new Date(a.data));
   const listaCompras = document.getElementById('listaCompras');
 
   if (compras.length === 0) {
-    listaCompras.innerHTML = `<div style="text-align:center;padding:30px 0;color:var(--ink-soft);font-size:13px">Nenhuma compra nesta fatura ainda.</div>`;
+    listaCompras.innerHTML = `<div style="text-align:center;padding:30px 0;color:var(--ink-soft);font-size:13px">Nenhuma compra registrada neste cartão ainda.</div>`;
   } else {
     listaCompras.innerHTML = compras.map((c) => `
       <div class="purchase-card">
         <div class="p-icon">${c.categoriaIcone}</div>
         <div class="p-info">
           <div class="p-name">${c.descricao || c.categoriaNome}</div>
-          <div class="p-date">${new Date(c.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}${c.parcelaTotal > 1 ? ` · parcela ${c.parcelaAtual}/${c.parcelaTotal}` : ''}</div>
+          <div class="p-date">${new Date(c.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}${c.parcelaTotal > 1 ? ` · parcela ${c.parcelaAtual}/${c.parcelaTotal}` : ''}${!c.noCicloAtual ? ' · entra na próxima fatura' : ''}</div>
         </div>
         <div class="p-value">${formatarMoeda(c.valorParcela)}</div>
       </div>
@@ -212,7 +217,26 @@ function cancelarImportacao() {
 async function confirmarImportacao() {
   const totalImportado = itensParaImportar.reduce((s, i) => s + i.valor, 0);
 
+  // Evita reimportar a mesma compra se esse arquivo (ou uma foto da mesma
+  // fatura) já tiver sido importado antes — compara valor, data e descrição
+  // contra o que já existe no banco, em qualquer cartão.
+  const despesasExistentes = await DB.listarTodos('despesa');
+  function jaFoiImportada(item) {
+    return despesasExistentes.some((d) =>
+      Math.abs(d.valor - item.valor) < 0.01 &&
+      d.data.slice(0, 10) === item.data.slice(0, 10) &&
+      d.descricao === item.descricao
+    );
+  }
+
+  let importadas = 0;
+  let jaExistiam = 0;
+
   for (const item of itensParaImportar) {
+    if (jaFoiImportada(item)) {
+      jaExistiam++;
+      continue;
+    }
     await DB.adicionar('despesa', {
       valor: item.valor,
       categoriaId: idCategoriaOutros,
@@ -222,6 +246,7 @@ async function confirmarImportacao() {
       parcelaTotal: 1,
       descricao: item.descricao
     });
+    importadas++;
   }
 
   // Regra do Valor Total de Segurança: se identificamos o total real da
@@ -249,6 +274,10 @@ async function confirmarImportacao() {
         descricao: 'Outros Gastos da Fatura (Ajuste OCR)'
       });
     }
+  }
+
+  if (jaExistiam > 0) {
+    alert(`${importadas} compra(s) nova(s) importada(s). ${jaExistiam} já existiam no seu histórico (mesmo valor, data e descrição) e foram puladas, pra não duplicar.`);
   }
 
   itensParaImportar = [];
