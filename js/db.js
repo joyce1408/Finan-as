@@ -298,14 +298,19 @@ async function entradasTotaisDoMes(mesISO = mesAtualISO()) {
 
 async function proximasFaturas() {
   const cartoes = await listarTodos('cartao');
-  const hoje = new Date();
+  const agora = new Date();
+  const hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate()); // sem hora, pra não empurrar o vencimento de "hoje" pro mês seguinte por causa da hora do dia
 
   return cartoes
     .map((c) => {
       let vencimento = new Date(hoje.getFullYear(), hoje.getMonth(), c.diaVencimento);
       if (vencimento < hoje) vencimento = new Date(hoje.getFullYear(), hoje.getMonth() + 1, c.diaVencimento);
       const diasRestantes = Math.ceil((vencimento - hoje) / (1000 * 60 * 60 * 24));
-      return { ...c, vencimento, diasRestantes };
+      // mês/ano do CICLO dessa fatura — usado pra calcular o valor certo,
+      // batendo com a data de vencimento mostrada (evita mostrar "vence em
+      // outubro" com o valor de setembro)
+      const mesISO = `${vencimento.getFullYear()}-${String(vencimento.getMonth() + 1).padStart(2, '0')}`;
+      return { ...c, vencimento, diasRestantes, mesISO };
     })
     .sort((a, b) => a.diasRestantes - b.diasRestantes);
 }
@@ -319,9 +324,15 @@ async function valorFaturaCartao(cartaoId, mesISO = mesAtualISO()) {
 
 async function cartoesComResumo() {
   const cartoes = await listarTodos('cartao');
+  const agora = new Date();
+  const hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
   const resultado = [];
   for (const c of cartoes) {
-    const despesasDoCiclo = await despesasDoCicloFatura(c.id);
+    let vencimento = new Date(hoje.getFullYear(), hoje.getMonth(), c.diaVencimento);
+    if (vencimento < hoje) vencimento = new Date(hoje.getFullYear(), hoje.getMonth() + 1, c.diaVencimento);
+    const mesISOFatura = `${vencimento.getFullYear()}-${String(vencimento.getMonth() + 1).padStart(2, '0')}`;
+
+    const despesasDoCiclo = await despesasDoCicloFatura(c.id, mesISOFatura);
     const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
     const percentualUsado = c.limite > 0 ? (valorFatura / c.limite) * 100 : 0;
     resultado.push({ ...c, valorFatura, percentualUsado });
@@ -464,7 +475,11 @@ async function removerDespesasDuplicadas() {
   const idsParaRemover = [];
 
   for (const d of despesas) {
-    const chave = [d.valor, d.data, d.descricao, d.cartaoId, d.categoriaId, d.parcelaAtual, d.parcelaTotal].join('|');
+    // Compara só valor + data + descrição (não cartão/categoria) — duas
+    // tentativas de cadastrar "a mesma compra da vida real" às vezes acabam
+    // com cartão diferente (ex.: uma como Dinheiro/Pix, outra vinculada a um
+    // cartão), mas continuam sendo a mesma transação duplicada.
+    const chave = [d.valor, d.data.slice(0, 10), d.descricao].join('|');
     if (vistos.has(chave)) {
       idsParaRemover.push(d.id);
     } else {
@@ -479,6 +494,29 @@ async function removerDespesasDuplicadas() {
   return idsParaRemover.length;
 }
 
+// Importa um backup completo (gerado por "Exportar meus dados") — apaga tudo
+// que existe no aparelho atual e recria exatamente como estava no backup,
+// preservando os IDs originais pra manter as relações entre despesa/cartão/
+// categoria intactas. Usado pra "clonar" o estado de um aparelho no outro,
+// já que não existe sincronização automática (o app é 100% local).
+async function importarDadosCompletos(dados) {
+  await apagarBancoCompleto();
+  await abrirBanco(); // reabre já recriando os object stores vazios
+
+  const ordem = ['categoria', 'cartao', 'renda', 'reserva', 'receita', 'despesa'];
+  for (const nomeStore of ordem) {
+    const registros = dados[nomeStore] || [];
+    for (const registro of registros) {
+      const store = await transacao(nomeStore, 'readwrite');
+      await new Promise((resolve, reject) => {
+        const req = store.add(registro);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+  }
+}
+
 window.DB = {
   abrirBanco, fecharBanco, apagarBancoCompleto, limparStore, seedInicial, adicionar, listarTodos, obterPorId, atualizar, remover,
   gastosDoMes, gastosPorCategoria, totalGastoNoMes, gastosDiariosDoMes, parcelasProximoMes,
@@ -486,5 +524,5 @@ window.DB = {
   proximasFaturas, valorFaturaCartao, cartoesComResumo,
   mesAtualISO, mesAnteriorISO, despesasDetalhadas, totalDespesasEntre, houveDespesaHoje,
   adicionarAporte, historicoAportes, despesasAVistaDoMes, faturaDevidaNoMes, faturasVencendoNoMes, saldoDisponivelDoMes,
-  despesasDoCicloFatura, removerDespesasDuplicadas
+  despesasDoCicloFatura, removerDespesasDuplicadas, importarDadosCompletos
 };

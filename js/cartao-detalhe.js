@@ -44,15 +44,17 @@ async function iniciar() {
   document.getElementById('bankName').textContent = cartao.nome;
   document.getElementById('bankSub').textContent = `Fecha dia ${cartao.diaFechamento} · vence dia ${cartao.diaVencimento}`;
 
-  const despesasDoCiclo = await DB.despesasDoCicloFatura(id);
+  const agora = new Date();
+  const hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate()); // sem hora — evita empurrar "vence hoje" pro mês seguinte por causa do horário
+  let vencimento = new Date(hoje.getFullYear(), hoje.getMonth(), cartao.diaVencimento);
+  if (vencimento < hoje) vencimento = new Date(hoje.getFullYear(), hoje.getMonth() + 1, cartao.diaVencimento);
+  const mesISOFatura = `${vencimento.getFullYear()}-${String(vencimento.getMonth() + 1).padStart(2, '0')}`;
+  document.getElementById('dueChip').textContent = `📅 Vence em ${vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}`;
+
+  const despesasDoCiclo = await DB.despesasDoCicloFatura(id, mesISOFatura);
   const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
   document.getElementById('valorFatura').textContent = formatarMoeda(valorFatura);
   limiteCartaoAtual = cartao.limite;
-
-  const hoje = new Date();
-  let vencimento = new Date(hoje.getFullYear(), hoje.getMonth(), cartao.diaVencimento);
-  if (vencimento < hoje) vencimento = new Date(hoje.getFullYear(), hoje.getMonth() + 1, cartao.diaVencimento);
-  document.getElementById('dueChip').textContent = `📅 Vence em ${vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}`;
 
   const percentual = cartao.limite > 0 ? (valorFatura / cartao.limite) * 100 : 0;
   const status = Motor.statusLimite(percentual);

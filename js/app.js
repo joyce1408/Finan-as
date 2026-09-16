@@ -98,7 +98,7 @@ async function renderHome() {
   billsList.innerHTML = '';
 
   for (const f of faturas.slice(0, 3)) {
-    const despesasDoCiclo = await DB.despesasDoCicloFatura(f.id);
+    const despesasDoCiclo = await DB.despesasDoCicloFatura(f.id, f.mesISO);
     const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
     const tag = f.diasRestantes <= 5
       ? { classe: 'tag-urgent', texto: 'Vence logo' }

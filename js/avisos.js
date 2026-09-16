@@ -11,7 +11,7 @@ async function gerarAvisos() {
   const faturas = await DB.proximasFaturas();
   for (const f of faturas) {
     if (f.diasRestantes <= 3) {
-      const despesasDoCiclo = await DB.despesasDoCicloFatura(f.id);
+      const despesasDoCiclo = await DB.despesasDoCicloFatura(f.id, f.mesISO);
       const valor = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
       avisos.push({
         tipo: 'alerta',
