@@ -479,7 +479,11 @@ async function removerDespesasDuplicadas() {
     // tentativas de cadastrar "a mesma compra da vida real" às vezes acabam
     // com cartão diferente (ex.: uma como Dinheiro/Pix, outra vinculada a um
     // cartão), mas continuam sendo a mesma transação duplicada.
-    const chave = [d.valor, d.data.slice(0, 10), d.descricao].join('|');
+    // Arredonda o valor pra centavos na comparação — evita que diferenças
+    // minúsculas de ponto flutuante (ex.: 245.27 vs 245.26999999999998),
+    // invisíveis na tela mas diferentes por baixo dos panos, impeçam duas
+    // cópias da mesma compra de serem reconhecidas como duplicata
+    const chave = [Math.round(d.valor * 100), d.data.slice(0, 10), d.descricao].join('|');
     if (vistos.has(chave)) {
       idsParaRemover.push(d.id);
     } else {
