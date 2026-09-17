@@ -3,7 +3,7 @@
 // Nenhuma dessas funções faz chamada de rede.
 
 const DB_NAME = 'financas_db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbInstance = null;
 
@@ -51,15 +51,53 @@ function abrirBanco() {
         const store = db.createObjectStore('aporte', { keyPath: 'id', autoIncrement: true });
         store.createIndex('data', 'data', { unique: false });
       }
+      // v4 — fundação pra parcelamento com previsão/confirmação e para
+      // controle de fatura paga/não paga (ver /areas/app-financas-pessoais)
+      if (!db.objectStoreNames.contains('fatura')) {
+        const store = db.createObjectStore('fatura', { keyPath: 'id', autoIncrement: true });
+        store.createIndex('cartaoId', 'cartaoId', { unique: false });
+        store.createIndex('mesISO', 'mesISO', { unique: false });
+      }
+
+      // índice novo numa store que já existe desde a v1 — precisa pegar a
+      // store de dentro da transação de upgrade, não recriar ela
+      if (db.objectStoreNames.contains('despesa')) {
+        const despesaStore = event.target.transaction.objectStore('despesa');
+        if (!despesaStore.indexNames.contains('idParcelamento')) {
+          despesaStore.createIndex('idParcelamento', 'idParcelamento', { unique: false });
+        }
+        if (!despesaStore.indexNames.contains('statusDespesa')) {
+          despesaStore.createIndex('statusDespesa', 'statusDespesa', { unique: false });
+        }
+      }
     };
 
-    request.onsuccess = (event) => {
+    request.onsuccess = async (event) => {
       dbInstance = event.target.result;
+      await migrarDespesasParaV4();
       resolve(dbInstance);
     };
 
     request.onerror = (event) => reject(event.target.error);
   });
+}
+
+// Preenche os campos novos (statusDespesa, idParcelamento, editadoManualmente)
+// em despesas que já existiam antes dessa versão. Idempotente: só mexe em
+// registros que ainda não têm statusDespesa definido, então rodar de novo
+// não duplica nem sobrescreve nada que já foi migrado. Usa atualizar() (put
+// no id que já existe), nunca adicionar() — não cria registro novo nenhum.
+async function migrarDespesasParaV4() {
+  const todasDespesas = await listarTodos('despesa');
+  for (const d of todasDespesas) {
+    if (d.statusDespesa !== undefined) continue; // já migrada
+    await atualizar('despesa', {
+      ...d,
+      statusDespesa: 'confirmado', // já existia no sistema = gasto real confirmado
+      idParcelamento: d.idParcelamento ?? null, // não sabemos que é parcelada, fica nulo
+      editadoManualmente: d.editadoManualmente ?? false
+    });
+  }
 }
 
 function fecharBanco() {
@@ -471,24 +509,25 @@ async function houveDespesaHoje() {
 // Mantém sempre a primeira ocorrência de cada uma.
 async function removerDespesasDuplicadas() {
   const despesas = await listarTodos('despesa');
-  const vistos = new Map();
-  const idsParaRemover = [];
 
+  // Agrupa despesas idênticas (valor + data + descrição, arredondando o
+  // valor pra centavos pra evitar diferenças escondidas de ponto flutuante)
+  const grupos = new Map();
   for (const d of despesas) {
-    // Compara só valor + data + descrição (não cartão/categoria) — duas
-    // tentativas de cadastrar "a mesma compra da vida real" às vezes acabam
-    // com cartão diferente (ex.: uma como Dinheiro/Pix, outra vinculada a um
-    // cartão), mas continuam sendo a mesma transação duplicada.
-    // Arredonda o valor pra centavos na comparação — evita que diferenças
-    // minúsculas de ponto flutuante (ex.: 245.27 vs 245.26999999999998),
-    // invisíveis na tela mas diferentes por baixo dos panos, impeçam duas
-    // cópias da mesma compra de serem reconhecidas como duplicata
     const chave = [Math.round(d.valor * 100), d.data.slice(0, 10), d.descricao].join('|');
-    if (vistos.has(chave)) {
-      idsParaRemover.push(d.id);
-    } else {
-      vistos.set(chave, d.id);
-    }
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(d);
+  }
+
+  const idsParaRemover = [];
+  for (const grupo of grupos.values()) {
+    if (grupo.length <= 1) continue;
+
+    // Dentro de cada grupo de duplicatas, mantém a cópia vinculada a um
+    // cartão (mais provável de ser "a certa") em vez de uma solta como
+    // Dinheiro/Pix — evita que a limpeza jogue fora a versão correta
+    const ordenado = [...grupo].sort((a, b) => (b.cartaoId ? 1 : 0) - (a.cartaoId ? 1 : 0));
+    for (let i = 1; i < ordenado.length; i++) idsParaRemover.push(ordenado[i].id);
   }
 
   for (const id of idsParaRemover) {
