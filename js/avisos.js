@@ -7,16 +7,21 @@ async function gerarAvisos() {
   const avisos = [];
   const hoje = new Date();
 
-  // 1) Fatura vencendo em até 3 dias
-  const faturas = await DB.proximasFaturas();
+  // 1) Fatura vencendo em até 3 dias (ou já vencida e ainda não paga) —
+  // sempre a partir das faturas reais, nunca mais recalculado por data
+  const faturas = await DB.faturasClassificadas();
   for (const f of faturas) {
-    if (f.diasRestantes <= 3) {
-      const despesasDoCiclo = await DB.despesasDoCicloFatura(f.id, f.mesISO);
-      const valor = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
+    if (f.situacao === 'vencida') {
       avisos.push({
         tipo: 'alerta',
         icone: '💳',
-        texto: `Fatura do ${f.nome} vence em ${f.diasRestantes} dia(s) — ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. Separe o valor com antecedência.`
+        texto: `Fatura do ${f.cartaoNome} venceu há ${Math.abs(f.diasRestantes)} dia(s) e ainda está marcada como não paga — ${f.totalOficial.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`
+      });
+    } else if (f.situacao === 'proxima' && f.diasRestantes <= 3) {
+      avisos.push({
+        tipo: 'alerta',
+        icone: '💳',
+        texto: `Fatura do ${f.cartaoNome} vence em ${f.diasRestantes} dia(s) — ${f.totalOficial.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. Separe o valor com antecedência.`
       });
     }
   }

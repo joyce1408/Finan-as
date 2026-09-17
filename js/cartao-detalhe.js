@@ -44,17 +44,30 @@ async function iniciar() {
   document.getElementById('bankName').textContent = cartao.nome;
   document.getElementById('bankSub').textContent = `Fecha dia ${cartao.diaFechamento} · vence dia ${cartao.diaVencimento}`;
 
-  const agora = new Date();
-  const hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate()); // sem hora — evita empurrar "vence hoje" pro mês seguinte por causa do horário
-  let vencimento = new Date(hoje.getFullYear(), hoje.getMonth(), cartao.diaVencimento);
-  if (vencimento < hoje) vencimento = new Date(hoje.getFullYear(), hoje.getMonth() + 1, cartao.diaVencimento);
-  const mesISOFatura = `${vencimento.getFullYear()}-${String(vencimento.getMonth() + 1).padStart(2, '0')}`;
-  document.getElementById('dueChip').textContent = `📅 Vence em ${vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}`;
+  // A fatura em destaque vem sempre do registro real (importado ou
+  // reconstruído pela migração), nunca mais recalculada por data + dia de
+  // fechamento estimado do cartão (regra 19). Fatura não paga nunca some
+  // como R$0,00 (regra 11): se não existe nenhuma fatura ainda, a tela
+  // avisa isso explicitamente, em vez de mostrar um valor inventado.
+  const fatura = await DB.faturaEmDestaquePorCartao(id);
 
-  const despesasDoCiclo = await DB.despesasDoCicloFatura(id, mesISOFatura);
-  const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
-  document.getElementById('valorFatura').textContent = formatarMoeda(valorFatura);
-  limiteCartaoAtual = cartao.limite;
+  if (!fatura) {
+    document.getElementById('dueChip').textContent = '📅 Nenhuma fatura importada ainda';
+    document.getElementById('valorFatura').textContent = formatarMoeda(0);
+    limiteCartaoAtual = cartao.limite;
+  } else {
+    const vencimento = new Date(fatura.vencimento);
+    const situacaoTexto = fatura.statusPagamento === 'paga'
+      ? 'Paga'
+      : (vencimento < new Date() ? 'Vencida — não paga' : 'Não paga');
+    const origemNota = fatura.origem === 'migrada' ? ' · dados estimados, confira' : '';
+    document.getElementById('dueChip').textContent =
+      `📅 Vence em ${vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })} · ${situacaoTexto}${origemNota}`;
+    document.getElementById('valorFatura').textContent = formatarMoeda(fatura.totalOficial);
+    limiteCartaoAtual = cartao.limite;
+  }
+
+  const valorFatura = fatura ? fatura.totalOficial : 0;
 
   const percentual = cartao.limite > 0 ? (valorFatura / cartao.limite) * 100 : 0;
   const status = Motor.statusLimite(percentual);
@@ -78,18 +91,31 @@ async function iniciar() {
 
   const categorias = await DB.listarTodos('categoria');
   const mapaCategoria = Object.fromEntries(categorias.map((c) => [c.id, c]));
-  const idsDoCicloAtual = new Set(despesasDoCiclo.map((d) => d.id));
+  const todasFaturasDoCartao = await DB.faturasPorCartao(id);
+  const mapaFatura = Object.fromEntries(todasFaturasDoCartao.map((f) => [f.id, f]));
 
   const todasDespesas = await DB.listarTodos('despesa');
   const compras = todasDespesas
     .filter((d) => d.cartaoId === id)
-    .map((d) => ({
-      ...d,
-      categoriaIcone: mapaCategoria[d.categoriaId]?.icone || '💰',
-      categoriaNome: mapaCategoria[d.categoriaId]?.nome || 'Outros',
-      valorParcela: d.valor / (d.parcelaTotal || 1),
-      noCicloAtual: idsDoCicloAtual.has(d.id)
-    }))
+    .map((d) => {
+      const faturaDaDespesa = d.faturaId != null ? mapaFatura[d.faturaId] : null;
+      // a etiqueta agora só descreve o que já se sabe pelo faturaId real —
+      // nunca mais um "entra na próxima fatura" adivinhado por data (regra 3/19)
+      let etiquetaFatura = '';
+      if (faturaDaDespesa && fatura && faturaDaDespesa.id !== fatura.id) {
+        etiquetaFatura = ` · fatura ${faturaDaDespesa.mesFatura}`;
+      } else if (!faturaDaDespesa) {
+        etiquetaFatura = ' · ainda sem fatura vinculada';
+      }
+      return {
+        ...d,
+        categoriaIcone: mapaCategoria[d.categoriaId]?.icone || '💰',
+        categoriaNome: mapaCategoria[d.categoriaId]?.nome || 'Outros',
+        // regra 4: d.valor já é o valor da parcela, nunca dividir de novo
+        valorParcela: d.valor,
+        etiquetaFatura
+      };
+    })
     .sort((a, b) => new Date(b.data) - new Date(a.data));
   const listaCompras = document.getElementById('listaCompras');
 
@@ -101,7 +127,7 @@ async function iniciar() {
         <div class="p-icon">${c.categoriaIcone}</div>
         <div class="p-info">
           <div class="p-name">${c.descricao || c.categoriaNome}</div>
-          <div class="p-date">${new Date(c.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}${c.parcelaTotal > 1 ? ` · parcela ${c.parcelaAtual}/${c.parcelaTotal}` : ''}${!c.noCicloAtual ? ' · entra na próxima fatura' : ''}</div>
+          <div class="p-date">${new Date(c.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}${c.parcelaTotal > 1 ? ` · parcela ${c.parcelaAtual}/${c.parcelaTotal}` : ''}${c.etiquetaFatura}</div>
         </div>
         <div class="p-value">${formatarMoeda(c.valorParcela)}</div>
       </div>

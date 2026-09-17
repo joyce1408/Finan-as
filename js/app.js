@@ -92,31 +92,41 @@ async function renderHome() {
     `);
   });
 
-  // Próximas faturas
-  const faturas = await DB.proximasFaturas();
+  // Próximas faturas — sempre a partir das faturas REAIS (importadas ou
+  // reconstruídas pela migração), nunca mais recalculado por data. Fatura
+  // não paga com vencimento já passado continua aparecendo, marcada como
+  // "Vencida", em vez de sumir mostrando R$0,00 (regra 11 e 20).
+  const faturas = (await DB.faturasClassificadas()).filter((f) => f.situacao !== 'quitada');
   const billsList = document.getElementById('billsList');
   billsList.innerHTML = '';
 
+  if (faturas.length === 0) {
+    billsList.innerHTML = `<div style="text-align:center;padding:20px 0;color:var(--ink-soft);font-size:13px">Nenhuma fatura importada ainda.</div>`;
+  }
+
   for (const f of faturas.slice(0, 3)) {
-    const despesasDoCiclo = await DB.despesasDoCicloFatura(f.id, f.mesISO);
-    const valorFatura = despesasDoCiclo.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
-    const tag = f.diasRestantes <= 5
-      ? { classe: 'tag-urgent', texto: 'Vence logo' }
-      : f.diasRestantes <= 12
-        ? { classe: 'tag-soon', texto: 'Em breve' }
-        : { classe: 'tag-ok', texto: 'Tranquilo' };
-    const iniciais = f.nome.slice(0, 2).toUpperCase();
-    const cor = CORES_CARTAO[f.nome] || '#3B3B3B';
+    const tag = f.situacao === 'vencida'
+      ? { classe: 'tag-urgent', texto: 'Vencida' }
+      : f.diasRestantes <= 5
+        ? { classe: 'tag-urgent', texto: 'Vence logo' }
+        : f.diasRestantes <= 12
+          ? { classe: 'tag-soon', texto: 'Em breve' }
+          : { classe: 'tag-ok', texto: 'Tranquilo' };
+    const iniciais = f.cartaoNome.slice(0, 2).toUpperCase();
+    const cor = CORES_CARTAO[f.cartaoNome] || '#3B3B3B';
+    const textoData = f.situacao === 'vencida'
+      ? `Venceu há ${Math.abs(f.diasRestantes)} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`
+      : `Vence em ${f.diasRestantes} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
 
     billsList.insertAdjacentHTML('beforeend', `
-      <div class="bill-card" onclick="location.href='cartao-detalhe.html?id=${f.id}'" style="cursor:pointer">
+      <div class="bill-card" onclick="location.href='cartao-detalhe.html?id=${f.cartaoId}'" style="cursor:pointer">
         <div class="bill-icon" style="background:${cor}">${iniciais}</div>
         <div class="bill-info">
-          <div class="bill-name">Cartão ${f.nome}</div>
-          <div class="bill-date">Vence em ${f.diasRestantes} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</div>
+          <div class="bill-name">Cartão ${f.cartaoNome}</div>
+          <div class="bill-date">${textoData}</div>
         </div>
         <div>
-          <div class="bill-amount">${formatarMoeda(valorFatura)}</div>
+          <div class="bill-amount">${formatarMoeda(f.totalOficial)}</div>
           <span class="bill-tag ${tag.classe}">${tag.texto}</span>
         </div>
       </div>
@@ -346,8 +356,11 @@ async function selecionarCartao(id) {
 
   const alertaBox = document.getElementById('alertaCartao');
   if (cartaoSelecionadoId) {
-    const despesasDoCicloSelecionado = await DB.despesasDoCicloFatura(cartaoSelecionadoId);
-    const valorAtual = despesasDoCicloSelecionado.reduce((soma, d) => soma + d.valor / (d.parcelaTotal || 1), 0);
+    // comprometimento = valor oficial da fatura em destaque desse cartão
+    // (a mais recente não paga, ou a última paga se não houver nenhuma em
+    // aberto); nunca mais recalculado por ciclo de data
+    const faturaDestaque = await DB.faturaEmDestaquePorCartao(cartaoSelecionadoId);
+    const valorAtual = faturaDestaque ? faturaDestaque.totalOficial : 0;
     const renda = await DB.rendaAtual();
     const avaliacao = Motor.avaliarComprometimentoCartao(valorAtual, renda);
     alertaBox.style.display = 'block';
