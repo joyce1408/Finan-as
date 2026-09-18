@@ -83,6 +83,29 @@
   </div>
 </div>
 
+<!-- Modal de ações de um lançamento (Editar / Excluir) desta compra do cartão -->
+<div class="sheet-overlay" id="sheetOverlayCompra" onclick="fecharModalCompraSeClicarFora(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Editar lançamento</div>
+
+    <div class="field-label">Valor</div>
+    <input type="text" inputmode="numeric" id="compraValor" class="text-input" placeholder="R$ 0,00">
+
+    <div class="field-label">Categoria</div>
+    <div class="chip-grid" id="compraCategoriaChips"></div>
+
+    <div class="field-label">Descrição</div>
+    <input type="text" id="compraDescricao" class="text-input" placeholder="Descrição (opcional)">
+
+    <div class="field-label">Data</div>
+    <input type="date" id="compraData" class="text-input">
+
+    <button class="save-btn" onclick="salvarEdicaoCompra()">Salvar alterações</button>
+    <button class="save-btn" style="background:transparent;color:var(--red);border:1px solid var(--red-soft);margin-top:10px" onclick="excluirCompra()">🗑️ Excluir lançamento</button>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/2.1.5/tesseract.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>

@@ -33,7 +33,22 @@
       <div class="filter-chip" id="chipPeriodo" onclick="togglePeriodoInput()">Período ▾</div>
     </div>
 
-    <input type="month" id="periodoInput" class="periodo-input" style="display:none">
+    <div id="periodoInput" class="periodo-input" style="display:none">
+      <div class="periodo-input-linha">
+        <div class="periodo-input-campo">
+          <div class="periodo-input-rotulo">Data inicial</div>
+          <input type="date" id="periodoDataInicial" class="text-input" style="margin-bottom:0">
+        </div>
+        <div class="periodo-input-campo">
+          <div class="periodo-input-rotulo">Data final</div>
+          <input type="date" id="periodoDataFinal" class="text-input" style="margin-bottom:0">
+        </div>
+      </div>
+      <div class="periodo-input-acoes">
+        <button type="button" class="periodo-btn periodo-btn-limpar" onclick="limparPeriodo()">Limpar</button>
+        <button type="button" class="periodo-btn periodo-btn-aplicar" onclick="aplicarPeriodo()">Aplicar</button>
+      </div>
+    </div>
 
     <div id="listaTransacoes"></div>
   </div>
