@@ -4,9 +4,11 @@
 let TODAS_DESPESAS = [];
 let TODAS_RECEITAS = [];
 let filtroAtivo = 'todas';
-// Filtro de Período: intervalo de DATA REAL DA TRANSAÇÃO, formato 'YYYY-MM-DD'.
-// Nunca usa mesFatura/faturaId/fechamento/vencimento — só a data real do
-// lançamento, igual pra qualquer cartão/banco.
+// Filtro de Período: representa a COMPETÊNCIA FINANCEIRA, não "quando a
+// compra aconteceu". Os campos de data (formato 'YYYY-MM-DD') só definem o
+// intervalo de MESES ('YYYY-MM') a considerar — despesa de cartão usa
+// fatura.mesFatura, dinheiro/pix e receita usam o mês da própria data real.
+// Nunca usa fechamento/vencimento. Funciona igual pra qualquer cartão/banco.
 let periodoInicio = null;
 let periodoFim = null;
 
@@ -100,24 +102,31 @@ function itensUnificados() {
     categoriaNome: 'Receita',
     categoriaIcone: '💰',
     cartaoNome: null,
-    descricao: r.descricao
+    descricao: r.descricao,
+    // competência financeira de uma receita = mês da própria data (regra 1C)
+    mesCompetencia: r.data.slice(0, 7)
   }));
   return [...despesas, ...receitas].sort((a, b) => new Date(b.data) - new Date(a.data));
 }
 
 function aplicarFiltros() {
   const termo = document.getElementById('buscaInput').value.trim().toLowerCase();
+  const mesInicio = periodoInicio ? periodoInicio.slice(0, 7) : null;
+  const mesFim = periodoFim ? periodoFim.slice(0, 7) : null;
 
   return itensUnificados().filter((d) => {
     if (filtroAtivo === 'cartao' && (d.tipo !== 'despesa' || !d.cartaoId)) return false;
     if (filtroAtivo === 'dinheiro' && (d.tipo !== 'despesa' || d.cartaoId)) return false;
     if (filtroAtivo === 'receitas' && d.tipo !== 'receita') return false;
 
-    // Período filtra pela DATA REAL DA TRANSAÇÃO (nunca mesFatura/faturaId/
-    // fechamento/vencimento) — funciona igual pra qualquer cartão/banco.
-    const dataReal = d.data.slice(0, 10);
-    if (periodoInicio && dataReal < periodoInicio) return false;
-    if (periodoFim && dataReal > periodoFim) return false;
+    // Período representa a COMPETÊNCIA FINANCEIRA, não a data em que a
+    // compra aconteceu: despesa de cartão usa fatura.mesFatura (via
+    // d.mesCompetencia, calculado em DB.despesasDetalhadas), dinheiro/pix e
+    // receita usam o mês da própria data real. A data real exibida na tela
+    // NUNCA muda — só a competência decide se o item entra no período
+    // selecionado.
+    if (mesInicio && d.mesCompetencia < mesInicio) return false;
+    if (mesFim && d.mesCompetencia > mesFim) return false;
 
     if (!termo) return true;
     const nome = (d.descricao || d.categoriaNome).toLowerCase();
@@ -154,8 +163,8 @@ function renderLista() {
           <span class="day-total">${sinalTotal}${formatarMoeda(Math.abs(totalDia))}</span>
         </div>
         ${itens.map((d) => `
-          <div class="txn-card" onclick="abrirDetalheTransacao(${d.id}, '${d.tipo}')" style="cursor:pointer">
-            <button type="button" class="txn-more" title="Ações" onclick="event.stopPropagation(); abrirDetalheTransacao(${d.id}, '${d.tipo}')">⋯</button>
+          <div class="txn-card">
+            <button type="button" class="txn-more" title="Ações" onclick="abrirDetalheTransacao(${d.id}, '${d.tipo}')">⋯</button>
             <div class="txn-icon">${d.categoriaIcone}</div>
             <div class="txn-info">
               <div class="txn-name">${d.descricao || d.categoriaNome}${d.statusDespesa === 'previsto' ? ' <span class=\'tag-previsto\'>Previsto</span>' : ''}</div>

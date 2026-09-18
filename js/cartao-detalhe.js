@@ -21,6 +21,7 @@ function getIdDaUrl() {
 }
 
 let limiteCartaoAtual = 0; // cache pra calcular a prévia sem salvar nada ainda
+let faturaDestaqueAtualId = null; // pra "Marcar como paga" saber qual fatura mexer
 
 async function iniciar() {
   await DB.abrirBanco();
@@ -50,11 +51,14 @@ async function iniciar() {
   // como R$0,00 (regra 11): se não existe nenhuma fatura ainda, a tela
   // avisa isso explicitamente, em vez de mostrar um valor inventado.
   const fatura = await DB.faturaEmDestaquePorCartao(id);
+  faturaDestaqueAtualId = fatura ? fatura.id : null;
+  const acaoFaturaPaga = document.getElementById('acaoFaturaPaga');
 
   if (!fatura) {
     document.getElementById('dueChip').textContent = '📅 Nenhuma fatura importada ainda';
     document.getElementById('valorFatura').textContent = formatarMoeda(0);
     limiteCartaoAtual = cartao.limite;
+    acaoFaturaPaga.innerHTML = '';
   } else {
     const vencimento = new Date(fatura.vencimento);
     const situacaoTexto = fatura.statusPagamento === 'paga'
@@ -65,6 +69,13 @@ async function iniciar() {
       `📅 Vence em ${vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })} · ${situacaoTexto}${origemNota}`;
     document.getElementById('valorFatura').textContent = formatarMoeda(fatura.totalOficial);
     limiteCartaoAtual = cartao.limite;
+
+    // "Marcar como paga" / "Desmarcar como paga": altera SOMENTE o status
+    // de pagamento da fatura (regra 14) — nunca despesas, valores, datas,
+    // mesFatura ou faturaId. Funciona igual pra qualquer cartão/banco.
+    acaoFaturaPaga.innerHTML = fatura.statusPagamento === 'paga'
+      ? `<button type="button" class="acao-fatura-paga-btn desmarcar" onclick="alternarFaturaPaga()">↩️ Desmarcar como paga</button>`
+      : `<button type="button" class="acao-fatura-paga-btn" onclick="alternarFaturaPaga()">✅ Marcar como paga</button>`;
   }
 
   const valorFatura = fatura ? fatura.totalOficial : 0;
@@ -137,6 +148,21 @@ async function iniciar() {
 }
 
 iniciar();
+
+// ---------- Marcar/desmarcar fatura como paga (regra 14) ----------
+async function alternarFaturaPaga() {
+  if (!faturaDestaqueAtualId) return;
+  const fatura = await DB.obterPorId('fatura', faturaDestaqueAtualId);
+  if (!fatura) return;
+
+  if (fatura.statusPagamento === 'paga') {
+    await DB.desmarcarFaturaComoPaga(faturaDestaqueAtualId);
+  } else {
+    await DB.marcarFaturaComoPaga(faturaDestaqueAtualId);
+  }
+
+  await iniciar();
+}
 
 // ---------- Importação unificada de fatura (foto, PDF ou CSV) ----------
 

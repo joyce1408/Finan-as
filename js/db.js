@@ -388,16 +388,43 @@ function mesAnteriorISO() {
 }
 
 // ---------- Despesas ----------
+// ---------- Competência financeira (regra definitiva) ----------
+// Três conceitos diferentes, que nunca podem ser confundidos:
+//   A) DATA REAL DA TRANSAÇÃO  — quando a compra aconteceu de verdade,
+//      preservada exatamente como veio (nunca alterada pra "encaixar" num mês).
+//   B) FATURA — a entidade real (Despesa.faturaId → Fatura.mesFatura).
+//   C) COMPETÊNCIA FINANCEIRA — o mês ao qual o gasto pertence pros cálculos
+//      mensais do app (Saídas, Relatórios, filtro de Período, categorias...).
+//
+// Regra: despesa de CARTÃO com faturaId vinculado a uma fatura real usa
+// fatura.mesFatura como competência (nunca a data real, nunca o fechamento,
+// nunca o vencimento). Despesa em DINHEIRO/PIX (sem cartão) e RECEITA usam o
+// mês da própria data real. Nada disso depende do nome do banco — só da
+// relação estrutural Despesa → Fatura.
+function competenciaDespesa(despesa, mapaFatura) {
+  if (despesa.cartaoId && despesa.faturaId != null) {
+    const fatura = mapaFatura[despesa.faturaId];
+    if (fatura) return fatura.mesFatura;
+  }
+  // dinheiro/pix, ou cartão cuja fatura ainda não foi vinculada (estado
+  // transitório) — única informação disponível é a data real
+  return despesa.data.slice(0, 7);
+}
+
+async function mapaFaturasPorId() {
+  const faturas = await listarTodos('fatura');
+  return Object.fromEntries(faturas.map((f) => [f.id, f]));
+}
 
 async function gastosDoMes(mesISO = mesAtualISO()) {
-  const todas = await listarTodos('despesa');
-  return todas.filter((d) => d.data.slice(0, 7) === mesISO);
+  const [todas, mapaFatura] = await Promise.all([listarTodos('despesa'), mapaFaturasPorId()]);
+  return todas.filter((d) => competenciaDespesa(d, mapaFatura) === mesISO);
 }
 
 async function despesasDetalhadas() {
-  const despesas = await listarTodos('despesa');
-  const categorias = await listarTodos('categoria');
-  const cartoes = await listarTodos('cartao');
+  const [despesas, categorias, cartoes, mapaFatura] = await Promise.all([
+    listarTodos('despesa'), listarTodos('categoria'), listarTodos('cartao'), mapaFaturasPorId()
+  ]);
   const mapaCategoria = Object.fromEntries(categorias.map((c) => [c.id, c]));
   const mapaCartao = Object.fromEntries(cartoes.map((c) => [c.id, c]));
 
@@ -409,25 +436,27 @@ async function despesasDetalhadas() {
       cartaoNome: d.cartaoId ? (mapaCartao[d.cartaoId]?.nome || null) : null,
       // regra definitiva: d.valor já É o valor da parcela (ex.: "Parcela 8/12
       // — R$245,27" grava valor:245.27), nunca dividir por parcelaTotal de novo
-      valorParcela: d.valor
+      valorParcela: d.valor,
+      // mês ao qual o gasto pertence financeiramente — nunca o mês da data
+      // real quando a despesa é de cartão com fatura vinculada (ver
+      // competenciaDespesa acima). A data real exibida na tela NÃO muda.
+      mesCompetencia: competenciaDespesa(d, mapaFatura)
     }))
     .sort((a, b) => new Date(b.data) - new Date(a.data));
 }
 
-// Regra definitiva (item 12/13 da especificação): "gasto no mês" = despesas
-// CONFIRMADAS cuja DATA REAL DA TRANSAÇÃO cai no mês calendário pedido,
-// somando todos os cartões + à vista. Não usa mais ciclo de fatura nenhum
-// pra decidir o que entra aqui — mês da transação e mês da fatura são
-// conceitos diferentes, e essa função é sobre o mês da transação. Previstos
-// nunca entram.
+// Regra definitiva: "gasto no mês" = despesas CONFIRMADAS cuja COMPETÊNCIA
+// FINANCEIRA (não a data real) cai no mês calendário pedido, somando todos
+// os cartões + à vista. Despesa de cartão usa fatura.mesFatura; dinheiro/pix
+// usa a data real. Previstos nunca entram.
 async function gastosPorCategoria(mesISO = mesAtualISO()) {
   const categorias = await listarTodos('categoria');
   const mapa = {};
   categorias.forEach((c) => { mapa[c.id] = { ...c, total: 0, itens: [] }; });
 
-  const todasDespesas = await listarTodos('despesa');
+  const [todasDespesas, mapaFatura] = await Promise.all([listarTodos('despesa'), mapaFaturasPorId()]);
   const relevantes = todasDespesas.filter((d) =>
-    d.statusDespesa === 'confirmado' && d.data.slice(0, 7) === mesISO
+    d.statusDespesa === 'confirmado' && competenciaDespesa(d, mapaFatura) === mesISO
   );
 
   relevantes.forEach((d) => {
@@ -445,6 +474,12 @@ async function totalGastoNoMes(mesISO = mesAtualISO()) {
   return categorias.reduce((soma, c) => soma + c.total, 0);
 }
 
+// Evolução diária: o eixo continua sendo o DIA REAL da transação (isso não
+// muda — a data real nunca é alterada), mas o CONJUNTO de despesas somadas
+// é filtrado pela competência financeira do mês selecionado, não pelo mês
+// da data real. Uma despesa de cartão com competência em agosto, mas com
+// data real em setembro, entra na evolução de agosto (no dia do mês
+// correspondente à sua data real), nunca na de setembro.
 async function gastosDiariosDoMes(mesISO = mesAtualISO()) {
   const despesas = (await gastosDoMes(mesISO)).filter((d) => d.statusDespesa === 'confirmado');
   const [ano, mes] = mesISO.split('-').map(Number);
@@ -453,7 +488,7 @@ async function gastosDiariosDoMes(mesISO = mesAtualISO()) {
 
   despesas.forEach((d) => {
     const dia = new Date(d.data).getDate();
-    porDia[dia - 1] += d.valor;
+    if (dia >= 1 && dia <= diasNoMes) porDia[dia - 1] += d.valor;
   });
 
   return porDia;
@@ -551,6 +586,26 @@ async function faturaEmDestaquePorCartao(cartaoId) {
   return doCartao.sort((a, b) => b.vencimento - a.vencimento)[0];
 }
 
+// Marca/desmarca uma fatura como paga. Altera SOMENTE statusPagamento da
+// própria fatura — nunca mexe em despesas, valores, datas, mesFatura,
+// faturaId, statusDespesa, nem cria parcela ou fatura nova. Funciona pra
+// qualquer fatura de qualquer cartão/banco (não depende do nome do banco).
+async function marcarFaturaComoPaga(faturaId) {
+  const fatura = await obterPorId('fatura', faturaId);
+  if (!fatura) return null;
+  const atualizada = { ...fatura, statusPagamento: 'paga' };
+  await atualizar('fatura', atualizada);
+  return atualizada;
+}
+
+async function desmarcarFaturaComoPaga(faturaId) {
+  const fatura = await obterPorId('fatura', faturaId);
+  if (!fatura) return null;
+  const atualizada = { ...fatura, statusPagamento: 'nao_paga' };
+  await atualizar('fatura', atualizada);
+  return atualizada;
+}
+
 async function cartoesComResumo() {
   const cartoes = await listarTodos('cartao');
   const resultado = [];
@@ -604,15 +659,17 @@ async function despesasAVistaDoMes(mesISO = mesAtualISO()) {
     .reduce((soma, d) => soma + d.valor, 0);
 }
 
-// Regra definitiva 12: Saídas da Home = soma das despesas CONFIRMADAS cuja
-// DATA REAL DA TRANSAÇÃO pertence ao mês calendário exibido, de todos os
-// cartões (genérico — nunca lógica específica por cartão). Mês da fatura e
-// mês da transação são conceitos diferentes: essa soma usa só a data da
-// transação, nunca o faturaId nem o ciclo/vencimento da fatura.
+// Regra definitiva: Saídas da Home = soma das despesas CONFIRMADAS cuja
+// COMPETÊNCIA FINANCEIRA pertence ao mês calendário exibido, de todos os
+// cartões (genérico — nunca lógica específica por cartão). Despesa de
+// cartão usa fatura.mesFatura; dinheiro/pix usa a data real. Um lançamento
+// como "Espaço Laser, data real 12/09, fatura de agosto" conta como saída
+// de AGOSTO, nunca de setembro — mesmo aparecendo na tela com a data real
+// de 12/09 (a data exibida não muda, só o mês em que ele é somado).
 async function saidasConfirmadasDoMes(mesISO = mesAtualISO()) {
-  const todas = await listarTodos('despesa');
+  const [todas, mapaFatura] = await Promise.all([listarTodos('despesa'), mapaFaturasPorId()]);
   return todas
-    .filter((d) => d.statusDespesa === 'confirmado' && d.data.slice(0, 7) === mesISO)
+    .filter((d) => d.statusDespesa === 'confirmado' && competenciaDespesa(d, mapaFatura) === mesISO)
     .reduce((soma, d) => soma + d.valor, 0);
 }
 
@@ -704,7 +761,8 @@ window.DB = {
   gastosDoMes, gastosPorCategoria, totalGastoNoMes, gastosDiariosDoMes, parcelasProximoMes,
   rendaAtual, receitasDoMes, totalReceitasAvulsasNoMes, entradasTotaisDoMes,
   cartoesComResumo, faturasPorCartao, despesasDaFatura, faturasClassificadas, faturaEmDestaquePorCartao,
+  marcarFaturaComoPaga, desmarcarFaturaComoPaga,
   mesAtualISO, mesAnteriorISO, somarMesISO, despesasDetalhadas, totalDespesasEntre, houveDespesaHoje,
   adicionarAporte, historicoAportes, despesasAVistaDoMes, saidasConfirmadasDoMes, saldoDisponivelDoMes,
-  removerDespesasDuplicadas, importarDadosCompletos
+  competenciaDespesa, removerDespesasDuplicadas, importarDadosCompletos
 };
