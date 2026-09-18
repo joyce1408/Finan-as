@@ -4,13 +4,62 @@
 let TODAS_DESPESAS = [];
 let TODAS_RECEITAS = [];
 let filtroAtivo = 'todas';
-let periodoAtivo = null; // formato 'YYYY-MM', null = todos os períodos
+// Filtro de Período: intervalo de DATA REAL DA TRANSAÇÃO, formato 'YYYY-MM-DD'.
+// Nunca usa mesFatura/faturaId/fechamento/vencimento — só a data real do
+// lançamento, igual pra qualquer cartão/banco.
+let periodoInicio = null;
+let periodoFim = null;
 
 function togglePeriodoInput() {
-  const input = document.getElementById('periodoInput');
-  const visivel = input.style.display !== 'none';
-  input.style.display = visivel ? 'none' : 'block';
-  if (!visivel) input.focus();
+  const painel = document.getElementById('periodoInput');
+  const visivel = painel.style.display !== 'none';
+  painel.style.display = visivel ? 'none' : 'block';
+}
+
+function limparPeriodo() {
+  periodoInicio = null;
+  periodoFim = null;
+  document.getElementById('periodoDataInicial').value = '';
+  document.getElementById('periodoDataFinal').value = '';
+  atualizarChipPeriodo();
+  document.getElementById('periodoInput').style.display = 'none';
+  renderLista();
+}
+
+function aplicarPeriodo() {
+  const inicio = document.getElementById('periodoDataInicial').value; // 'YYYY-MM-DD' ou ''
+  const fim = document.getElementById('periodoDataFinal').value;
+
+  if (inicio && fim && inicio > fim) {
+    alert('A data inicial não pode ser depois da data final.');
+    return;
+  }
+
+  periodoInicio = inicio || null;
+  periodoFim = fim || null;
+  atualizarChipPeriodo();
+  document.getElementById('periodoInput').style.display = 'none';
+  renderLista();
+}
+
+function atualizarChipPeriodo() {
+  const chip = document.getElementById('chipPeriodo');
+  if (!periodoInicio && !periodoFim) {
+    chip.textContent = 'Período ▾';
+    chip.classList.remove('active');
+    return;
+  }
+  const formatarCurto = (iso) => {
+    const [ano, mes, dia] = iso.split('-');
+    return `${dia}/${mes}`;
+  };
+  const texto = periodoInicio && periodoFim
+    ? `${formatarCurto(periodoInicio)} – ${formatarCurto(periodoFim)}`
+    : periodoInicio
+      ? `A partir de ${formatarCurto(periodoInicio)}`
+      : `Até ${formatarCurto(periodoFim)}`;
+  chip.textContent = `${texto} ▾`;
+  chip.classList.add('active');
 }
 
 function formatarMoeda(valor) {
@@ -63,7 +112,12 @@ function aplicarFiltros() {
     if (filtroAtivo === 'cartao' && (d.tipo !== 'despesa' || !d.cartaoId)) return false;
     if (filtroAtivo === 'dinheiro' && (d.tipo !== 'despesa' || d.cartaoId)) return false;
     if (filtroAtivo === 'receitas' && d.tipo !== 'receita') return false;
-    if (periodoAtivo && d.data.slice(0, 7) !== periodoAtivo) return false;
+
+    // Período filtra pela DATA REAL DA TRANSAÇÃO (nunca mesFatura/faturaId/
+    // fechamento/vencimento) — funciona igual pra qualquer cartão/banco.
+    const dataReal = d.data.slice(0, 10);
+    if (periodoInicio && dataReal < periodoInicio) return false;
+    if (periodoFim && dataReal > periodoFim) return false;
 
     if (!termo) return true;
     const nome = (d.descricao || d.categoriaNome).toLowerCase();
@@ -101,9 +155,10 @@ function renderLista() {
         </div>
         ${itens.map((d) => `
           <div class="txn-card" onclick="abrirDetalheTransacao(${d.id}, '${d.tipo}')" style="cursor:pointer">
+            <button type="button" class="txn-more" title="Ações" onclick="event.stopPropagation(); abrirDetalheTransacao(${d.id}, '${d.tipo}')">⋯</button>
             <div class="txn-icon">${d.categoriaIcone}</div>
             <div class="txn-info">
-              <div class="txn-name">${d.descricao || d.categoriaNome}</div>
+              <div class="txn-name">${d.descricao || d.categoriaNome}${d.statusDespesa === 'previsto' ? ' <span class=\'tag-previsto\'>Previsto</span>' : ''}</div>
               <div class="txn-meta">${d.categoriaNome}${d.tipo === 'despesa' ? ' · ' + rotuloFormaPagamento(d) : ''}${d.parcelaTotal > 1 ? ` · parcela ${d.parcelaAtual}/${d.parcelaTotal}` : ''}</div>
             </div>
             <div class="txn-value ${d.tipo === 'receita' ? 'income' : ''}">${d.tipo === 'receita' ? '+ ' : '− '}${formatarMoeda(d.valorParcela)}</div>
@@ -117,22 +172,6 @@ function renderLista() {
 }
 
 document.getElementById('buscaInput').addEventListener('input', renderLista);
-
-document.getElementById('periodoInput').addEventListener('change', (e) => {
-  periodoAtivo = e.target.value || null;
-  const chip = document.getElementById('chipPeriodo');
-  if (periodoAtivo) {
-    const [ano, mes] = periodoAtivo.split('-');
-    const nomeMes = new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'short' });
-    chip.textContent = `${nomeMes}/${ano} ▾`;
-    chip.classList.add('active');
-  } else {
-    chip.textContent = 'Período ▾';
-    chip.classList.remove('active');
-  }
-  document.getElementById('periodoInput').style.display = 'none';
-  renderLista();
-});
 
 document.getElementById('filtros').addEventListener('click', (e) => {
   const chip = e.target.closest('.filter-chip');
@@ -246,7 +285,9 @@ async function salvarEdicaoTransacao() {
     if (!categoriaId) { alert('Escolha uma categoria.'); return; }
 
     const registro = await DB.obterPorId('despesa', transacaoEmEdicao.id);
-    await DB.atualizar('despesa', { ...registro, valor, descricao, categoriaId, cartaoId, data: dataFinal });
+    // marca como editada manualmente: uma importação/reconciliação futura
+    // (Parte 2) não pode recriar nem desfazer silenciosamente essa alteração
+    await DB.atualizar('despesa', { ...registro, valor, descricao, categoriaId, cartaoId, data: dataFinal, editadoManualmente: true });
   } else {
     const registro = await DB.obterPorId('receita', transacaoEmEdicao.id);
     await DB.atualizar('receita', { ...registro, valor, descricao: descricao || 'Receita avulsa', data: dataFinal });

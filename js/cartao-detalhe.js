@@ -124,9 +124,10 @@ async function iniciar() {
   } else {
     listaCompras.innerHTML = compras.map((c) => `
       <div class="purchase-card">
+        <button type="button" class="txn-more" title="Ações" onclick="abrirAcoesCompra(${c.id})">⋯</button>
         <div class="p-icon">${c.categoriaIcone}</div>
         <div class="p-info">
-          <div class="p-name">${c.descricao || c.categoriaNome}</div>
+          <div class="p-name">${c.descricao || c.categoriaNome}${c.statusDespesa === 'previsto' ? ' <span class=\'tag-previsto\'>Previsto</span>' : ''}</div>
           <div class="p-date">${new Date(c.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}${c.parcelaTotal > 1 ? ` · parcela ${c.parcelaAtual}/${c.parcelaTotal}` : ''}${c.etiquetaFatura}</div>
         </div>
         <div class="p-value">${formatarMoeda(c.valorParcela)}</div>
@@ -426,6 +427,79 @@ async function salvarEdicaoCartao() {
   });
 
   fecharModal();
+  await iniciar();
+}
+
+// ---------- Ações de um lançamento (Editar / Excluir) ----------
+// As ações previstas aqui são só Editar e Excluir — não existe ainda
+// nenhuma detecção de lançamentos duplicados/mesclagem no app, então essa
+// ação não é oferecida por enquanto (fica pendente pra quando existir).
+
+let compraEmEdicaoId = null;
+
+async function abrirAcoesCompra(id) {
+  compraEmEdicaoId = id;
+  const registro = await DB.obterPorId('despesa', id);
+  if (!registro) return;
+
+  aplicarMascaraMoeda(document.getElementById('compraValor'));
+  definirValorMascarado(document.getElementById('compraValor'), registro.valor);
+  document.getElementById('compraDescricao').value = registro.descricao || '';
+  document.getElementById('compraData').value = registro.data.slice(0, 10);
+
+  const categorias = await DB.listarTodos('categoria');
+  document.getElementById('compraCategoriaChips').innerHTML = categorias.map((c) => `
+    <div class="chip ${c.id === registro.categoriaId ? 'selected' : ''}" data-id="${c.id}" onclick="selecionarCategoriaCompra(${c.id})">${c.icone} ${c.nome}</div>
+  `).join('');
+  document.getElementById('compraCategoriaChips').dataset.selecionado = registro.categoriaId;
+
+  document.getElementById('sheetOverlayCompra').classList.add('open');
+}
+
+function selecionarCategoriaCompra(id) {
+  const container = document.getElementById('compraCategoriaChips');
+  container.dataset.selecionado = id;
+  container.querySelectorAll('.chip').forEach((c) => c.classList.toggle('selected', Number(c.dataset.id) === id));
+}
+
+function fecharModalCompra() {
+  document.getElementById('sheetOverlayCompra').classList.remove('open');
+  compraEmEdicaoId = null;
+}
+
+function fecharModalCompraSeClicarFora(event) {
+  if (event.target.id === 'sheetOverlayCompra') fecharModalCompra();
+}
+
+async function salvarEdicaoCompra() {
+  if (!compraEmEdicaoId) return;
+  const valor = valorNumericoDoInput(document.getElementById('compraValor'));
+  if (!valor || valor <= 0) { alert('Valor inválido.'); return; }
+
+  const categoriaId = Number(document.getElementById('compraCategoriaChips').dataset.selecionado);
+  if (!categoriaId) { alert('Escolha uma categoria.'); return; }
+
+  const descricao = document.getElementById('compraDescricao').value.trim();
+  const dataEscolhida = document.getElementById('compraData').value; // "AAAA-MM-DD"
+  const [ano, mes, dia] = dataEscolhida.split('-').map(Number);
+  const dataFinal = new Date(ano, mes - 1, dia).toISOString();
+
+  const registro = await DB.obterPorId('despesa', compraEmEdicaoId);
+  // marca como editada manualmente: uma importação/reconciliação futura
+  // (Parte 2) não pode recriar nem desfazer silenciosamente essa alteração
+  await DB.atualizar('despesa', { ...registro, valor, categoriaId, descricao, data: dataFinal, editadoManualmente: true });
+
+  fecharModalCompra();
+  await iniciar();
+}
+
+async function excluirCompra() {
+  if (!compraEmEdicaoId) return;
+  const ok = confirm('Excluir este lançamento? Essa ação não pode ser desfeita.');
+  if (!ok) return;
+
+  await DB.remover('despesa', compraEmEdicaoId);
+  fecharModalCompra();
   await iniciar();
 }
 
