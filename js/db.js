@@ -150,6 +150,28 @@ function somarMesISO(mesISO, delta) {
 // de verdade (fluxo que ainda vai ser construído) cria fatura com
 // origem: 'importada' e dados confiáveis.
 async function migrarFaturasParaV5() {
+  // Correção: faturas 'migrada' são estimativas, nunca dado confirmado pelo
+  // usuário (não existe ainda tela pra editar/pagar uma fatura). Por isso é
+  // seguro reprocessá-las do zero toda vez, com a estimativa mais recente —
+  // isso autocorrige, nas próximas aberturas do app, quem já tinha sido
+  // migrado com a estimativa antiga (o bug relatado: fatura de agosto sendo
+  // apresentada como se vencesse em outubro/novembro). Uma fatura 'importada'
+  // (dado real, quando o fluxo de importação existir) nunca é tocada aqui.
+  const faturasExistentes = await listarTodos('fatura');
+  const faturasParaRefazer = faturasExistentes.filter((f) => f.origem === 'migrada' && f.statusPagamento === 'nao_paga');
+  if (faturasParaRefazer.length > 0) {
+    const idsParaRefazer = new Set(faturasParaRefazer.map((f) => f.id));
+    const todasDespesasAtuais = await listarTodos('despesa');
+    for (const d of todasDespesasAtuais) {
+      if (idsParaRefazer.has(d.faturaId)) {
+        await atualizar('despesa', { ...d, faturaId: undefined });
+      }
+    }
+    for (const f of faturasParaRefazer) {
+      await remover('fatura', f.id);
+    }
+  }
+
   const todasDespesas = await listarTodos('despesa');
   const pendentes = todasDespesas.filter((d) => d.faturaId === undefined);
   if (pendentes.length === 0) return;
@@ -166,11 +188,20 @@ async function migrarFaturasParaV5() {
 
   const cartoes = await listarTodos('cartao');
   const mapaCartao = Object.fromEntries(cartoes.map((c) => [c.id, c]));
+  const mesAtual = mesAtualISO();
 
-  // agrupa cada despesa de cartão no mesmo "mês da fatura" estimado que a
-  // lógica antiga usava: comprou até o dia de fechamento estimado → fatura
-  // do próprio mês da compra; comprou depois → fatura do mês seguinte
-  const grupos = new Map(); // chave "cartaoId|mesFatura" -> despesas[]
+  // agrupa cada despesa de cartão pelo MÊS DE FECHAMENTO estimado (não é o
+  // mesFatura/competência — são conceitos diferentes, ver abaixo): comprou
+  // até o dia de fechamento estimado → fecha no próprio mês da compra;
+  // comprou depois → fecha no mês seguinte. Trava importante: o mês de
+  // fechamento estimado NUNCA pode passar do mês atual — toda despesa
+  // migrada já aconteceu no passado, então não existe base real pra estimar
+  // um fechamento num mês que ainda nem começou. Sem essa trava, uma compra
+  // no fim do mês (como a Espaço Laser, dia 12, com o cartão configurado com
+  // dia de fechamento bem cedo) podia ser jogada pra um fechamento futuro,
+  // fazendo o sistema tratar uma fatura que já existe (e já pode estar
+  // vencida) como se fosse uma fatura ainda não criada lá na frente.
+  const grupos = new Map(); // chave "cartaoId|mesFechamento" -> despesas[]
   for (const d of comCartao) {
     const cartao = mapaCartao[d.cartaoId];
     if (!cartao) { await atualizar('despesa', { ...d, faturaId: null }); continue; }
@@ -178,27 +209,39 @@ async function migrarFaturasParaV5() {
     const dia = new Date(d.data).getDate();
     const mesDaCompra = d.data.slice(0, 7);
     const diaFechamentoEstimado = cartao.diaFechamento || 1;
-    const mesFaturaEstimado = dia <= diaFechamentoEstimado ? mesDaCompra : somarMesISO(mesDaCompra, 1);
+    let mesFechamentoEstimado = dia <= diaFechamentoEstimado ? mesDaCompra : somarMesISO(mesDaCompra, 1);
+    if (mesFechamentoEstimado > mesAtual) mesFechamentoEstimado = mesAtual; // trava: nunca estima fechamento no futuro
 
-    const chave = `${d.cartaoId}|${mesFaturaEstimado}`;
+    const chave = `${d.cartaoId}|${mesFechamentoEstimado}`;
     if (!grupos.has(chave)) grupos.set(chave, []);
     grupos.get(chave).push(d);
   }
 
   for (const [chave, despesasDoGrupo] of grupos) {
-    const [cartaoIdTexto, mesFatura] = chave.split('|');
+    const [cartaoIdTexto, mesFechamento] = chave.split('|');
     const cartaoId = Number(cartaoIdTexto);
     const cartao = mapaCartao[cartaoId];
+    const diaFech = cartao.diaFechamento || 1;
+    const diaVenc = cartao.diaVencimento || 10;
 
-    // fechamento/vencimento estimados: aplica o dia de fechamento/vencimento
-    // já cadastrado no cartão sobre o mês da fatura estimado — é a mesma
-    // estimativa que já existia, só que agora fica guardada na fatura em vez
-    // de recalculada toda hora
-    const [ano, mes] = mesFatura.split('-').map(Number);
-    const fechamentoEstimado = new Date(ano, mes - 1, cartao.diaFechamento || 1).toISOString();
-    const mesVencimento = somarMesISO(mesFatura, 1);
+    // fechamento estimado: dia de fechamento do cartão, no mês de fechamento.
+    const [ano, mes] = mesFechamento.split('-').map(Number);
+    const fechamentoEstimado = new Date(ano, mes - 1, diaFech).toISOString();
+
+    // vencimento estimado: se o dia de vencimento do cartão é maior ou igual
+    // ao dia de fechamento, o vencimento cai no mesmo mês do fechamento; só
+    // cai no mês seguinte quando o dia de vencimento é menor (fechou no fim
+    // de um mês, vence já no começo do próximo).
+    const mesVencimento = diaVenc >= diaFech ? mesFechamento : somarMesISO(mesFechamento, 1);
     const [anoVenc, mesVenc] = mesVencimento.split('-').map(Number);
-    const vencimentoEstimado = new Date(anoVenc, mesVenc - 1, cartao.diaVencimento || 10).toISOString();
+    const vencimentoEstimado = new Date(anoVenc, mesVenc - 1, diaVenc).toISOString();
+
+    // mesFatura (competência/statement) é diferente do mês de fechamento —
+    // essa regra (fechamento - 1 mês) é uma ESTIMATIVA exclusiva da migração
+    // histórica, porque não temos o mesFatura real confirmado por ninguém.
+    // Fatura importada de verdade (fluxo futuro) usa o mesFatura que o
+    // usuário informar/confirmar, nunca esse cálculo.
+    const mesFatura = somarMesISO(mesFechamento, -1);
 
     const totalEstimado = despesasDoGrupo.reduce((soma, d) => soma + d.valor, 0);
 
