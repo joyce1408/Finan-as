@@ -93,30 +93,47 @@ async function renderHome() {
   });
 
   // Próximas faturas — sempre a partir das faturas REAIS (importadas ou
-  // reconstruídas pela migração), nunca mais recalculado por data. Fatura
-  // não paga com vencimento já passado continua aparecendo, marcada como
-  // "Vencida", em vez de sumir mostrando R$0,00 (regra 11 e 20).
-  const faturas = (await DB.faturasClassificadas()).filter((f) => f.situacao !== 'quitada');
+  // reconstruídas pela migração), nunca mais recalculado por data. Regra
+  // 11/13/19 da revisão: o status de pagamento é uma propriedade da fatura,
+  // NUNCA um critério pra tirá-la da tela — uma fatura paga continua
+  // existindo e continua aparecendo aqui, só marcada como "✅ Paga". A
+  // mensagem "Nenhuma fatura importada ainda" só pode aparecer quando não
+  // existe NENHUMA fatura cadastrada (nunca quando existem, mas todas já
+  // foram pagas).
+  const todasFaturas = await DB.faturasClassificadas();
   const billsList = document.getElementById('billsList');
   billsList.innerHTML = '';
 
-  if (faturas.length === 0) {
+  if (todasFaturas.length === 0) {
     billsList.innerHTML = `<div style="text-align:center;padding:20px 0;color:var(--ink-soft);font-size:13px">Nenhuma fatura importada ainda.</div>`;
   }
 
-  for (const f of faturas.slice(0, 3)) {
-    const tag = f.situacao === 'vencida'
-      ? { classe: 'tag-urgent', texto: 'Vencida' }
-      : f.diasRestantes <= 5
+  // Mostra até 3 faturas: prioriza as pendentes de pagamento (mais urgente
+  // primeiro); se não houver pendências suficientes pra preencher a lista,
+  // completa com as pagas mais recentes — uma fatura paga nunca desaparece,
+  // só perde prioridade de destaque pra quem ainda precisa ser paga.
+  const naoPagas = todasFaturas.filter((f) => f.situacao !== 'quitada');
+  const pagas = todasFaturas.filter((f) => f.situacao === 'quitada').sort((a, b) => b.vencimento - a.vencimento);
+  const faturasParaMostrar = [...naoPagas, ...pagas].slice(0, 3);
+
+  for (const f of faturasParaMostrar) {
+    let tag, textoData;
+    if (f.situacao === 'quitada') {
+      tag = { classe: 'tag-ok', texto: '✅ Paga' };
+      textoData = `Fatura de ${f.mesFatura} · paga`;
+    } else if (f.situacao === 'vencida') {
+      tag = { classe: 'tag-urgent', texto: '🔴 Vencida' };
+      textoData = `Venceu há ${Math.abs(f.diasRestantes)} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
+    } else {
+      tag = f.diasRestantes <= 5
         ? { classe: 'tag-urgent', texto: 'Vence logo' }
         : f.diasRestantes <= 12
           ? { classe: 'tag-soon', texto: 'Em breve' }
-          : { classe: 'tag-ok', texto: 'Tranquilo' };
+          : { classe: 'tag-ok', texto: 'Não paga' };
+      textoData = `Vence em ${f.diasRestantes} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
+    }
     const iniciais = f.cartaoNome.slice(0, 2).toUpperCase();
     const cor = CORES_CARTAO[f.cartaoNome] || '#3B3B3B';
-    const textoData = f.situacao === 'vencida'
-      ? `Venceu há ${Math.abs(f.diasRestantes)} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`
-      : `Vence em ${f.diasRestantes} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
 
     billsList.insertAdjacentHTML('beforeend', `
       <div class="bill-card" onclick="location.href='cartao-detalhe.html?id=${f.cartaoId}'" style="cursor:pointer">
@@ -180,9 +197,10 @@ async function renderHome() {
   const limiteCritico = renda * 0.15;
   const estadoCritico = renda > 0 && saldo <= limiteCritico;
 
-  // Cenário 3: calmo — nenhuma fatura vencendo nos próximos 3 dias e saldo
-  // acima da meta de poupança que a categoria "Essenciais" consome no mês
-  const semFaturaProxima = !faturas.some((f) => f.diasRestantes <= 3);
+  // Cenário 3: calmo — nenhuma fatura NÃO PAGA vencendo nos próximos 3 dias
+  // (uma fatura já paga não conta pra esse alerta) e saldo acima da meta de
+  // poupança que a categoria "Essenciais" consome no mês
+  const semFaturaProxima = !naoPagas.some((f) => f.diasRestantes <= 3);
   const estadoCalmo = !estadoCritico && semFaturaProxima && saldo > 0 && reserva.valorAtual >= reserva.meta * 0.5;
 
   const balanceCard = document.getElementById('balanceCard');

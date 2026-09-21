@@ -100,6 +100,7 @@ function abrirBanco() {
       dbInstance = event.target.result;
       await migrarDespesasParaV4();
       await migrarFaturasParaV5();
+      await migrarParcelamentosExistentes();
       resolve(dbInstance);
     };
 
@@ -291,6 +292,90 @@ async function migrarFaturasParaV5() {
       await atualizar('despesa', { ...d, faturaId: novaFaturaId });
     }
     mapaFaturaPorChave.set(chaveFatura, { id: novaFaturaId, cartaoId, mesFatura, totalOficial: totalEstimado, origem: 'migrada' });
+  }
+}
+
+// Mesma regra de reconhecimento usada na importação (js/importar-fatura.js,
+// extrairParcela) — duplicada aqui, de propósito, porque essa migração roda
+// dentro de abrirBanco() e precisa funcionar em QUALQUER tela, mesmo nas que
+// não carregam importar-fatura.js (ex.: index.html). Mantém exatamente a
+// mesma regra: só reconhece "parcela"/"parc" do lado do número, nunca um
+// "N/M" solto, pra nunca confundir com uma data (ex.: "12/09").
+function extrairParcelaDaDescricao(descricao) {
+  if (!descricao) return null;
+  const m = descricao.match(/parc(?:ela)?\.?\s*(\d{1,2})\s*\/\s*(\d{1,2})/i);
+  if (!m) return null;
+  const parcelaAtual = parseInt(m[1], 10);
+  const parcelaTotal = parseInt(m[2], 10);
+  if (!parcelaAtual || !parcelaTotal || parcelaAtual < 1 || parcelaTotal < 1 || parcelaAtual > parcelaTotal) return null;
+  return { parcelaAtual, parcelaTotal };
+}
+
+// ---------- Migração de parcelamentos que já existiam antes desta lógica (regra 5) ----------
+// gerarParcelasFuturasPrevistas só passou a rodar a partir de uma importação
+// feita com DB.importarFatura. Um parcelamento que já estava gravado no
+// banco ANTES dessa lógica existir (ex.: a Espaço Laser 8/12, importada
+// antes desta revisão) nunca teve as parcelas futuras (9/12..12/12) geradas,
+// nem uma idParcelamento definida. Esta migração reprocessa esses casos de
+// forma GENÉRICA — nunca específica de uma loja ou banco: qualquer despesa
+// CONFIRMADA que seja uma parcela (parcelaTotal > 1, já salvo no registro ou
+// reconhecido de novo na própria descrição, ex. "Parcela N/M") ganha uma
+// idParcelamento (o próprio id, quando ainda não tem nenhuma — mesma regra
+// usada em gravarOuReconciliarItemDaFatura pra despesa nova) e tem as
+// parcelas FUTURAS que ainda faltam geradas como previstas — nunca as
+// anteriores à parcela conhecida (regra 6, já garantida dentro de
+// gerarParcelasFuturasPrevistas, que nunca gera pra trás de parcelaAtual).
+// Idempotente: reaproveita a mesma trava de gerarParcelasFuturasPrevistas
+// (confere a série já existente por idParcelamento antes de criar), então
+// rodar de novo (toda vez que o app abre) nunca duplica nada.
+async function migrarParcelamentosExistentes() {
+  const todasDespesas = await listarTodos('despesa');
+  const mapaFatura = await mapaFaturasPorId();
+
+  for (const d of todasDespesas) {
+    if (d.statusDespesa !== 'confirmado') continue; // só reprocessa gasto real confirmado, nunca uma previsão
+
+    let parcelaAtual = d.parcelaAtual;
+    let parcelaTotal = d.parcelaTotal;
+
+    // campo ainda não preenchido (despesa de antes dessa estrutura existir)
+    // — tenta reconhecer "parcela N/M" na própria descrição
+    if (!parcelaTotal || parcelaTotal <= 1) {
+      const detectada = extrairParcelaDaDescricao(d.descricao);
+      if (detectada) {
+        parcelaAtual = detectada.parcelaAtual;
+        parcelaTotal = detectada.parcelaTotal;
+      }
+    }
+
+    if (!parcelaTotal || parcelaTotal <= 1 || !parcelaAtual) continue; // não é parcelada, ou falta informação pra saber quais parcelas faltam
+
+    // normaliza a identidade da série: sem idParcelamento ainda, essa
+    // despesa É a raiz da série
+    let idParcelamento = d.idParcelamento;
+    const camposMudaram = d.parcelaAtual !== parcelaAtual || d.parcelaTotal !== parcelaTotal || !idParcelamento;
+    if (!idParcelamento) idParcelamento = d.id;
+
+    if (camposMudaram) {
+      await atualizar('despesa', { ...d, parcelaAtual, parcelaTotal, idParcelamento });
+    }
+
+    // mesFatura de referência: da fatura vinculada, quando existir; senão, o
+    // mês da própria data real da parcela atual (única informação disponível)
+    const fatura = d.faturaId != null ? mapaFatura[d.faturaId] : null;
+    const mesFaturaAtual = fatura ? fatura.mesFatura : d.data.slice(0, 7);
+
+    await gerarParcelasFuturasPrevistas({
+      cartaoId: d.cartaoId,
+      categoriaId: d.categoriaId,
+      descricaoBase: d.descricao || '',
+      valorParcela: d.valor,
+      diaReferencia: diaDoMes(d.data),
+      mesFaturaAtual,
+      parcelaAtual,
+      parcelaTotal,
+      idParcelamento
+    });
   }
 }
 
@@ -1015,7 +1100,7 @@ const DB = {
   adicionarAporte, historicoAportes, despesasAVistaDoMes, saidasConfirmadasDoMes, saldoDisponivelDoMes,
   competenciaDespesa, removerDespesasDuplicadas, importarDadosCompletos,
   faturaExistenteParaCartaoMes, importarFatura, migrarFaturasParaV5, migrarDespesasParaV4,
-  mesesEntre, historicoGastosMensais
+  mesesEntre, historicoGastosMensais, migrarParcelamentosExistentes, extrairParcelaDaDescricao
 };
 
 if (typeof window !== 'undefined') window.DB = DB;
