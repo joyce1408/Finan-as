@@ -6,7 +6,17 @@
 // o desenvolvimento (dados financeiros nunca passam por aqui — ficam só no
 // IndexedDB).
 
-const CACHE_NAME = 'financas-app-v12';
+// Regra 20 da revisão: a estratégia já era (e continua sendo) "rede
+// primeiro" (ver o listener 'fetch' abaixo) — todo aparelho com internet
+// sempre busca a versão mais nova antes de olhar o cache, então Mac e
+// iPhone já convergem pro mesmo JS sempre que há conexão; o cache serve só
+// de rede de segurança pro modo offline. O número da versão aqui embaixo só
+// precisa subir a cada publicação (como agora) pra garantir que o passo
+// 'activate' limpe o cache antigo — isso mexe SOMENTE no Cache Storage
+// (arquivos estáticos), nunca no IndexedDB (onde ficam os dados financeiros
+// reais) — ver o listener 'activate', que só chama caches.delete(), nunca
+// indexedDB.deleteDatabase().
+const CACHE_NAME = 'financas-app-v13';
 const ARQUIVOS_PARA_CACHE = [
   './index.html',
   './onboarding.html',
