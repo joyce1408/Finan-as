@@ -310,16 +310,17 @@ async function faturaExistenteParaCartaoMes(cartaoId, mesFatura) {
 // cicloFim, totalOficial, statusPagamento } — mesFatura é o dado informado/
 // confirmado pelo usuário na importação, nunca calculado a partir da data das
 // compras. itens: [{ valor, data, descricao, categoriaId, parcelaAtual,
-// parcelaTotal, idParcelamento }] — cada item vira uma despesa já com
-// faturaId, cartaoId e statusDespesa: 'confirmado' preenchidos.
+// parcelaTotal }] — cada item vira uma despesa já com faturaId, cartaoId e
+// statusDespesa: 'confirmado' preenchidos.
 //
 // Se já existir uma fatura pra esse cartaoId + mesFatura (regra 2: nunca
 // duplicar), os itens são vinculados a ela em vez de criar uma nova; o
 // totalOficial informado atualiza a fatura existente (é sempre o dado mais
-// recente confirmado pelo usuário), mas statusPagamento e origem da fatura
-// existente NUNCA são alterados aqui — marcar uma fatura como paga é uma ação
-// separada (marcarFaturaComoPaga) e não pode ser desfeita por uma nova
-// importação.
+// recente confirmado pelo usuário), e a fatura passa a ser origem:'importada'
+// (uma fatura 'migrada' que recebe uma importação real de verdade deixa de
+// ser estimativa — ela agora tem dado confirmado pelo usuário). statusPagamento
+// NUNCA é alterado aqui — marcar uma fatura como paga é uma ação separada
+// (marcarFaturaComoPaga) e não pode ser desfeita por uma nova importação.
 async function importarFatura(dadosFatura, itens) {
   const { cartaoId, mesFatura } = dadosFatura;
   if (!cartaoId) throw new Error('importarFatura: cartaoId é obrigatório');
@@ -332,7 +333,7 @@ async function importarFatura(dadosFatura, itens) {
   if (existente) {
     faturaId = existente.id;
     criada = false;
-    const atualizacao = { ...existente };
+    const atualizacao = { ...existente, origem: 'importada' };
     if (dadosFatura.totalOficial !== undefined && dadosFatura.totalOficial !== null) atualizacao.totalOficial = dadosFatura.totalOficial;
     if (dadosFatura.vencimento) atualizacao.vencimento = dadosFatura.vencimento;
     if (dadosFatura.fechamento) atualizacao.fechamento = dadosFatura.fechamento;
@@ -354,25 +355,133 @@ async function importarFatura(dadosFatura, itens) {
   }
 
   const despesaIds = [];
+  const revisaoNecessaria = []; // itens que bateram em mais de uma previsão — não mesclados sozinhos, ficam pra conferência manual
   for (const item of itens || []) {
-    const id = await adicionar('despesa', {
-      valor: item.valor,
-      categoriaId: item.categoriaId,
-      cartaoId,
-      faturaId,
-      formaPagamento: 'cartao',
-      data: item.data,
-      descricao: item.descricao || '',
-      parcelaAtual: item.parcelaAtual ?? 1,
-      parcelaTotal: item.parcelaTotal ?? 1,
-      idParcelamento: item.idParcelamento ?? null,
-      statusDespesa: item.statusDespesa || 'confirmado',
-      editadoManualmente: false
-    });
+    const { id, precisaRevisao } = await gravarOuReconciliarItemDaFatura(cartaoId, faturaId, mesFatura, item);
     despesaIds.push(id);
+    if (precisaRevisao) revisaoNecessaria.push(id);
   }
 
-  return { faturaId, criada, despesaIds };
+  return { faturaId, criada, despesaIds, revisaoNecessaria };
+}
+
+function diaDoMes(dataISO) {
+  return new Date(dataISO).getDate();
+}
+
+// Mesmo dia-do-mês da despesa original, projetado pro mês informado —
+// clampado ao último dia do mês quando ele tem menos dias (ex.: dia 31
+// projetado pra um mês de 30 dias vira dia 30).
+function dataProjetadaNoMes(mesISO, dia) {
+  const [ano, mes] = mesISO.split('-').map(Number);
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  return new Date(ano, mes - 1, Math.min(dia, diasNoMes)).toISOString();
+}
+
+// Troca "8/12" por "9/12" (etc.) dentro da descrição original, se o padrão
+// aparecer nela; senão só acrescenta a indicação no fim. Usado só pra gerar
+// o texto das parcelas PREVISTAS — nunca altera a descrição real gravada
+// numa despesa confirmada/importada.
+function descricaoComParcelaProjetada(descricaoBase, parcelaOriginal, parcelaProjetada, parcelaTotal) {
+  const padrao = new RegExp(`\\b${parcelaOriginal}\\s*/\\s*${parcelaTotal}\\b`);
+  if (padrao.test(descricaoBase)) return descricaoBase.replace(padrao, `${parcelaProjetada}/${parcelaTotal}`);
+  return `${descricaoBase} (parcela ${parcelaProjetada}/${parcelaTotal} prevista)`;
+}
+
+// Regra 3/5/6/7 do pedido de revisão: uma despesa com parcelaTotal > 1 é uma
+// compra parcelada. Se o item que está chegando (de uma importação real)
+// bate por identidade — mesmo cartão, mesma parcelaTotal, mesma parcelaAtual,
+// status 'previsto' — com uma parcela que já tínhamos PREVISTO antes (gerada
+// numa importação anterior), ela é RECONCILIADA: a previsão vira confirmada,
+// com o valor/data/descrição/faturaId REAIS que acabaram de chegar — nunca
+// cria uma segunda despesa pra essa parcela. Se houver mais de uma previsão
+// batendo (identidade ambígua), NÃO mescla sozinho — grava como uma despesa
+// nova e devolve precisaRevisao:true, pra quem chamou avisar a usuária.
+// Depois de gravar/reconciliar, gera (só as que ainda não existem) as
+// parcelas FUTURAS como previstas — nunca as passadas (regra 6) — usando o
+// mesmo valor da parcela atual como estimativa, até a fatura real de cada
+// mês futuro chegar e reconciliar de novo.
+async function gravarOuReconciliarItemDaFatura(cartaoId, faturaId, mesFatura, item) {
+  const parcelaAtual = item.parcelaAtual ?? 1;
+  const parcelaTotal = item.parcelaTotal ?? 1;
+  const dadosReais = {
+    valor: item.valor,
+    categoriaId: item.categoriaId,
+    cartaoId,
+    faturaId,
+    formaPagamento: 'cartao',
+    data: item.data,
+    descricao: item.descricao || '',
+    parcelaAtual,
+    parcelaTotal,
+    statusDespesa: item.statusDespesa || 'confirmado',
+    editadoManualmente: false
+  };
+
+  let id;
+  let idParcelamento = null;
+  let precisaRevisao = false;
+
+  if (parcelaTotal > 1) {
+    const todasDespesas = await listarTodos('despesa');
+    const candidatas = todasDespesas.filter((d) =>
+      d.cartaoId === cartaoId && d.parcelaTotal === parcelaTotal && d.parcelaAtual === parcelaAtual && d.statusDespesa === 'previsto'
+    );
+
+    if (candidatas.length === 1) {
+      const prevista = candidatas[0];
+      idParcelamento = prevista.idParcelamento ?? prevista.id;
+      await atualizar('despesa', { ...prevista, ...dadosReais, idParcelamento });
+      id = prevista.id;
+    } else {
+      if (candidatas.length > 1) precisaRevisao = true; // identidade ambígua — não mescla sozinho
+      id = await adicionar('despesa', { ...dadosReais, idParcelamento: null });
+      idParcelamento = id; // primeira vez que essa série aparece: a própria despesa é a "raiz" da série
+      await atualizar('despesa', { ...dadosReais, id, idParcelamento });
+    }
+
+    await gerarParcelasFuturasPrevistas({ cartaoId, categoriaId: item.categoriaId, descricaoBase: item.descricao || '', valorParcela: item.valor, diaReferencia: diaDoMes(item.data), mesFaturaAtual: mesFatura, parcelaAtual, parcelaTotal, idParcelamento });
+  } else {
+    id = await adicionar('despesa', { ...dadosReais, idParcelamento: null });
+  }
+
+  return { id, precisaRevisao };
+}
+
+// Gera as parcelas parcelaAtual+1 .. parcelaTotal como PREVISTAS, uma por
+// mês seguinte, só as que ainda não existem (idempotente: rodar de novo pra
+// a mesma parcela confirmada nunca duplica). Nunca gera parcelaAtual pra
+// trás (regra 6 — não recriar parcelas passadas: o laço nem começa antes de
+// parcelaAtual + 1). Cada uma tem faturaId: null (a fatura real dela ainda
+// não existe) — por isso a competência dela usa a própria data projetada
+// (ver competenciaDespesa), que é exatamente o mês em que ela é esperada.
+async function gerarParcelasFuturasPrevistas({ cartaoId, categoriaId, descricaoBase, valorParcela, diaReferencia, mesFaturaAtual, parcelaAtual, parcelaTotal, idParcelamento }) {
+  if (parcelaAtual >= parcelaTotal) return;
+
+  const todasDespesas = await listarTodos('despesa');
+  const existentesDaSerie = new Set(
+    todasDespesas.filter((d) => d.idParcelamento === idParcelamento).map((d) => d.parcelaAtual)
+  );
+
+  for (let k = parcelaAtual + 1; k <= parcelaTotal; k++) {
+    if (existentesDaSerie.has(k)) continue; // já existe (prevista de uma rodada anterior, ou já reconciliada) — não duplica
+
+    const mesAlvo = somarMesISO(mesFaturaAtual, k - parcelaAtual);
+    await adicionar('despesa', {
+      valor: valorParcela,
+      categoriaId,
+      cartaoId,
+      faturaId: null,
+      formaPagamento: 'cartao',
+      data: dataProjetadaNoMes(mesAlvo, diaReferencia),
+      descricao: descricaoComParcelaProjetada(descricaoBase, parcelaAtual, k, parcelaTotal),
+      parcelaAtual: k,
+      parcelaTotal,
+      idParcelamento,
+      statusDespesa: 'previsto',
+      editadoManualmente: false
+    });
+  }
 }
 
 function fecharBanco() {

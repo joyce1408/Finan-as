@@ -375,12 +375,21 @@ async function confirmarImportacao() {
   const totalOficial = ImportarFatura.parseValorMonetario(totalTexto);
   if (isNaN(totalOficial) || totalOficial <= 0) { alert('Valor total inválido.'); return; }
 
-  const itensParaGravar = itensNovos.map((item) => ({
-    valor: item.valor,
-    data: item.data,
-    descricao: item.descricao,
-    categoriaId: idCategoriaOutros
-  }));
+  // Regra 3/4: detecta "Parcela 8/12" (etc.) na descrição reconhecida — só
+  // quando o padrão aparece de verdade, nunca confundindo com uma data
+  // (regra do extrairParcela: exige a palavra "parcela" do lado). Compra sem
+  // esse padrão continua parcelaAtual/parcelaTotal 1/1 (à vista), como sempre.
+  const itensParaGravar = itensNovos.map((item) => {
+    const parcela = ImportarFatura.extrairParcela(item.descricao);
+    return {
+      valor: item.valor,
+      data: item.data,
+      descricao: item.descricao,
+      categoriaId: idCategoriaOutros,
+      parcelaAtual: parcela ? parcela.parcelaAtual : 1,
+      parcelaTotal: parcela ? parcela.parcelaTotal : 1
+    };
+  });
 
   // Regra do Valor Total de Segurança (mantida): se o total oficial
   // confirmado é maior que a soma dos itens reconhecidos linha por linha,
@@ -416,6 +425,9 @@ async function confirmarImportacao() {
   let mensagem = `${itensParaGravar.length} lançamento(s) importado(s) pra fatura de ${mesFatura}.`;
   if (jaExistiam > 0) mensagem += ` ${jaExistiam} já existiam no seu histórico e foram pulados, pra não duplicar.`;
   if (!resultado.criada) mensagem += ' Já existia uma fatura desse cartão nesse mês — os lançamentos foram vinculados a ela, sem criar fatura duplicada.';
+  if (resultado.revisaoNecessaria.length > 0) {
+    mensagem += ` Atenção: ${resultado.revisaoNecessaria.length} lançamento(s) parcelado(s) bateram com mais de uma previsão existente — não mesclei sozinho, pra não errar. Confira manualmente essas compras em "Compras deste cartão".`;
+  }
   alert(mensagem);
 
   itensParaImportar = [];

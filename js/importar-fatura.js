@@ -120,9 +120,23 @@ function parseFaturaCsv(textoCsv) {
   return { validos, erros };
 }
 
+// Procura "parcela 8/12" (ou "parc 8/12", "parc. 8/12") na descrição de um
+// lançamento — sempre exige a palavra "parc(ela)" do lado, nunca um "N/M"
+// solto, pra nunca confundir com uma data escrita como "12/09". Devolve
+// {parcelaAtual, parcelaTotal} ou null quando a compra não é parcelada.
+function extrairParcela(descricao) {
+  if (!descricao) return null;
+  const m = descricao.match(/parc(?:ela)?\.?\s*(\d{1,2})\s*\/\s*(\d{1,2})/i);
+  if (!m) return null;
+  const parcelaAtual = parseInt(m[1], 10);
+  const parcelaTotal = parseInt(m[2], 10);
+  if (!parcelaAtual || !parcelaTotal || parcelaAtual < 1 || parcelaTotal < 1 || parcelaAtual > parcelaTotal) return null;
+  return { parcelaAtual, parcelaTotal };
+}
+
 if (typeof window !== 'undefined') {
-  window.ImportarFatura = { parseFaturaCsv, parseValorMonetario, parseDataFatura };
+  window.ImportarFatura = { parseFaturaCsv, parseValorMonetario, parseDataFatura, extrairParcela };
 }
 if (typeof module !== 'undefined') {
-  module.exports = { parseFaturaCsv, parseValorMonetario, parseDataFatura };
+  module.exports = { parseFaturaCsv, parseValorMonetario, parseDataFatura, extrairParcela };
 }
