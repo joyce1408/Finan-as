@@ -88,9 +88,32 @@ function rotuloFormaPagamento(d) {
   return rotulos[d.formaPagamento] || 'Dinheiro / Pix'; // fallback pra despesas antigas sem o campo
 }
 
-function chaveDia(dataISO) {
-  const d = new Date(dataISO);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+// Regra 1 da revisão: dois lançamentos podem ter a MESMA data real mas
+// pertencerem a competências financeiras diferentes (ex.: a 8/12 confirmada
+// de agosto e a 9/12 prevista de setembro, ambas projetadas/registradas no
+// dia 12) — a chave de agrupamento da visão "Todas" precisa incluir a
+// competência, senão duas parcelas de meses diferentes viram um único grupo
+// com um total de dia que mistura gasto de um mês com previsão de outro
+// (ex.: um "12 de setembro — R$490,54" que na verdade é 245,27 de agosto +
+// 245,27 de setembro). Isso não muda a data real armazenada — só separa a
+// APRESENTAÇÃO em dois grupos quando a competência diverge.
+function chaveDia(item) {
+  const d = new Date(item.data);
+  return `${item.mesCompetencia || ''}|${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+// Quando a competência financeira do item cai num mês diferente do mês da
+// própria data real (ex.: compra em 12/09, mas competência agosto/2026 por
+// causa do fechamento da fatura), mostra essa informação junto do rótulo do
+// dia — preserva as duas informações (data real E competência) sem misturar
+// uma com a outra (regra 1: "Competência: Agosto/2026 · Compra em: 12/09/2026").
+function rotuloCompetenciaSeDiferente(item) {
+  if (!item.mesCompetencia) return '';
+  const mesReal = item.data.slice(0, 7);
+  if (item.mesCompetencia === mesReal) return '';
+  const [ano, mes] = item.mesCompetencia.split('-').map(Number);
+  const nomeMes = new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  return ` · competência: ${nomeMes}`;
 }
 
 function itensUnificados() {
@@ -147,7 +170,7 @@ function renderLista() {
 
   const grupos = new Map();
   despesas.forEach((d) => {
-    const chave = chaveDia(d.data);
+    const chave = chaveDia(d);
     if (!grupos.has(chave)) grupos.set(chave, []);
     grupos.get(chave).push(d);
   });
@@ -159,7 +182,7 @@ function renderLista() {
     html += `
       <div class="day-group">
         <div class="day-head">
-          <span class="day-label">${rotuloDia(itens[0].data)}</span>
+          <span class="day-label">${rotuloDia(itens[0].data)}${rotuloCompetenciaSeDiferente(itens[0])}</span>
           <span class="day-total">${sinalTotal}${formatarMoeda(Math.abs(totalDia))}</span>
         </div>
         ${itens.map((d) => `

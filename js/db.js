@@ -828,14 +828,28 @@ async function gastosDiariosDoMes(mesISO = mesAtualISO()) {
   return porDia;
 }
 
-// parcelas PREVISTAS (ainda não confirmadas) de compras parceladas — usado
-// pro alerta de comprometimento futuro. d.valor já é o valor de cada parcela
-// individual, nunca dividir por parcelaTotal de novo (regra 4).
+// "Comprometimento do cartão" (regra 8/9 da revisão): precisa representar
+// quanto do cartão está comprometido NO MÊS SEGUINTE ao atual — um único
+// mês, nunca a soma de todas as parcelas futuras restantes como se fossem
+// cobradas de uma vez só (isso inflava o percentual: 4 parcelas futuras de
+// R$245,27 viravam R$981,08 contra a renda de 1 mês só). O nome da função e
+// o texto em motor.js ("comprometem X% da sua renda do PRÓXIMO MÊS") já
+// deixavam esse conceito claro — só a implementação não filtrava por mês
+// nenhum. Usa a MESMA regra de competência financeira de sempre
+// (competenciaDespesa, a mesma função usada em gastosPorCategoria,
+// historicoGastosMensais, saídas etc. — nunca uma lógica de mês separada só
+// pra esse indicador): uma parcela com faturaId vinculado usa
+// fatura.mesFatura; senão, o mês da própria data (que, pra uma prevista
+// recém-gerada, já É a projeção dela pro mês certo). Só conta despesas que
+// são parcela de verdade (parcelaTotal > 1) — regra 10: uma parcela já
+// confirmada em outro mês (ex.: 8/12 em agosto) nunca é recontada aqui,
+// porque a competência dela não é o mês seguinte.
 async function parcelasProximoMes() {
-  const todas = await listarTodos('despesa');
+  const mesSeguinte = somarMesISO(mesAtualISO(), 1);
+  const [todas, mapaFatura] = await Promise.all([listarTodos('despesa'), mapaFaturasPorId()]);
   return todas
-    .filter((d) => d.parcelaTotal > 1 && d.parcelaAtual < d.parcelaTotal && d.statusDespesa !== 'confirmado')
-    .reduce((soma, d) => soma + d.valor, 0);
+    .filter((d) => d.parcelaTotal > 1 && competenciaDespesa(d, mapaFatura) === mesSeguinte)
+    .reduce((soma, d) => soma + d.valor, 0); // d.valor já é o valor da parcela individual (regra 4), nunca dividir de novo
 }
 
 // ---------- Receitas ----------
