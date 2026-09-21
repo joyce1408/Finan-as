@@ -79,6 +79,9 @@
     <div class="field-label">Dia de vencimento da fatura</div>
     <input type="number" inputmode="numeric" id="inputVencimentoCartao" class="text-input" placeholder="Ex.: 14" min="1" max="31">
 
+    <div class="field-label">Dia de fechamento da fatura</div>
+    <input type="number" inputmode="numeric" id="inputFechamentoCartao" class="text-input" placeholder="Ex.: 3 (confira na fatura real do banco)" min="1" max="31">
+
     <button class="save-btn" onclick="salvarEdicaoCartao()">Salvar alterações</button>
     <button class="save-btn" style="background:transparent;color:var(--red);border:1px solid var(--red-soft);margin-top:10px" onclick="excluirCartao()">Excluir cartão</button>
   </div>
