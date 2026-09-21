@@ -63,6 +63,41 @@ async function renderGrafico() {
   document.getElementById('lblFim').textContent = String(totalDias);
 }
 
+// ---------- Histórico mensal (regra 5) — visão ADICIONAL, não substitui o
+// gráfico diário do mês atual acima. Mostra o total gasto por COMPETÊNCIA
+// financeira em cada um dos últimos meses (Julho/2026, Agosto/2026...),
+// respeitando a mesma regra de sempre: despesa de cartão conta no mês da
+// fatura dela, não em quando a fatura foi paga nem no mês da data real.
+const NOMES_MES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+function rotuloMes(mesISO) {
+  const [ano, mes] = mesISO.split('-').map(Number);
+  return `${NOMES_MES[mes - 1]}/${ano}`;
+}
+
+async function renderHistoricoMensal() {
+  const mesFim = DB.mesAtualISO();
+  const mesInicio = DB.somarMesISO(mesFim, -5); // últimos 6 meses, incluindo o atual
+  const historico = await DB.historicoGastosMensais(mesInicio, mesFim);
+
+  const lista = document.getElementById('historicoMensalList');
+  const maior = Math.max(...historico.map((h) => h.total), 1);
+
+  lista.innerHTML = historico.map((h) => {
+    const pct = Math.max((h.total / maior) * 100, h.total > 0 ? 3 : 0);
+    const ehMesAtual = h.mesISO === mesFim;
+    return `
+      <div class="bar-row">
+        <div class="bar-row-top">
+          <div class="bar-name">${rotuloMes(h.mesISO)}${ehMesAtual ? ' <span style="color:var(--ink-soft);font-weight:400">(atual)</span>' : ''}</div>
+          <div class="bar-right"><span class="bar-value">${formatarMoeda(h.total)}</span></div>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct.toFixed(0)}%; background:#2F5FE0"></div></div>
+      </div>
+    `;
+  }).join('');
+}
+
 // Ícones e cores por grupo do gráfico (5 colunas fixas). Categorias novas
 // criadas em "Gerenciar Categorias" entram automaticamente na coluna que a
 // usuária escolher — nada aqui precisa mudar quando ela cria uma categoria.
@@ -256,6 +291,7 @@ async function renderEvolucaoReserva() {
   await Promise.all([
     renderVisaoGeral(),
     renderGrafico(),
+    renderHistoricoMensal(),
     renderCategorias(),
     renderInsights(),
     renderComprometimento(),

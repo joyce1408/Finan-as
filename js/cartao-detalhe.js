@@ -269,8 +269,59 @@ function cancelarImportacao() {
   iniciar(); // restaura os valores reais no card e na barra (a prévia não foi salva)
 }
 
+// ---------- Sugestões para a importação (regra 1) ----------
+// Tudo aqui é só uma SUGESTÃO pré-preenchida nos prompts — quem decide e
+// confirma o mês da fatura, o vencimento e o total oficial é sempre a
+// usuária. Nada disso é gravado sem confirmação.
+
+// Sugere o mês da fatura como o mês mais frequente entre os itens
+// reconhecidos (empate resolvido pelo mês mais antigo). Isso é só o ponto de
+// partida do prompt — nunca o valor final gravado.
+function sugerirMesFatura(itens) {
+  if (itens.length === 0) return DB.mesAnteriorISO();
+  const contagem = new Map();
+  for (const item of itens) {
+    const mes = item.data.slice(0, 7);
+    contagem.set(mes, (contagem.get(mes) || 0) + 1);
+  }
+  let melhorMes = null;
+  let melhorContagem = -1;
+  for (const [mes, qtd] of [...contagem.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (qtd > melhorContagem) { melhorContagem = qtd; melhorMes = mes; }
+  }
+  return melhorMes;
+}
+
+// Sugere a data de fechamento REAL desta fatura a partir do dia de
+// fechamento configurado no cartão (nunca mais calculado como
+// vencimento - 9, regra 3) — o fechamento de uma fatura de competência
+// mesFatura cai, por convenção do sistema bancário, no mês seguinte.
+function calcularFechamento(mesFatura, diaFechamento) {
+  const mesFechamento = DB.somarMesISO(mesFatura, 1);
+  const [ano, mes] = mesFechamento.split('-').map(Number);
+  return new Date(ano, mes - 1, diaFechamento).toISOString();
+}
+
+// Sugere a data de vencimento (só o texto do prompt, "AAAA-MM-DD") a partir
+// do dia de vencimento e de fechamento configurados no cartão.
+function sugerirVencimento(mesFatura, cartao) {
+  const mesFechamento = DB.somarMesISO(mesFatura, 1);
+  const diaFech = cartao.diaFechamento;
+  const diaVenc = cartao.diaVencimento;
+  const mesVencimento = diaVenc >= diaFech ? mesFechamento : DB.somarMesISO(mesFechamento, 1);
+  const [ano, mes] = mesVencimento.split('-').map(Number);
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(diaVenc).padStart(2, '0')}`;
+}
+
 async function confirmarImportacao() {
-  const totalImportado = itensParaImportar.reduce((s, i) => s + i.valor, 0);
+  if (itensParaImportar.length === 0) return;
+
+  const cartao = await DB.obterPorId('cartao', idCartaoAtual);
+  if (!cartao) { alert('Cartão não encontrado.'); return; }
+  if (!cartao.diaFechamento) {
+    alert('Antes de importar, edite o cartão (✏️) e informe o dia de fechamento real da fatura — confira na sua fatura do banco.');
+    return;
+  }
 
   // Evita reimportar a mesma compra se esse arquivo (ou uma foto da mesma
   // fatura) já tiver sido importado antes — compara valor, data e descrição
@@ -284,56 +335,88 @@ async function confirmarImportacao() {
     );
   }
 
-  let importadas = 0;
+  const itensNovos = [];
   let jaExistiam = 0;
-
   for (const item of itensParaImportar) {
-    if (jaFoiImportada(item)) {
-      jaExistiam++;
-      continue;
-    }
-    await DB.adicionar('despesa', {
-      valor: item.valor,
-      categoriaId: idCategoriaOutros,
-      cartaoId: idCartaoAtual,
-      data: item.data,
-      parcelaAtual: 1,
-      parcelaTotal: 1,
-      descricao: item.descricao
+    if (jaFoiImportada(item)) jaExistiam++;
+    else itensNovos.push(item);
+  }
+
+  if (itensNovos.length === 0) {
+    alert(`Nenhuma compra nova pra importar — ${jaExistiam} já existiam no seu histórico (mesmo valor, data e descrição).`);
+    itensParaImportar = [];
+    valorTotalFaturaDetectado = null;
+    document.getElementById('previewImportacao').innerHTML = '';
+    await iniciar();
+    return;
+  }
+
+  // Regra 1: o mês da fatura (competência) é o dado que a usuária confirma
+  // aqui, nunca uma estimativa baseada na data da compra ou no dia de
+  // fechamento — isso vira fatura.mesFatura direto, sem depender de
+  // nenhuma migração posterior pra descobrir a qual fatura a despesa pertence.
+  const mesFaturaTexto = prompt(
+    'Qual é o mês desta fatura (competência)? Formato AAAA-MM — confira no topo/resumo da fatura do banco.',
+    sugerirMesFatura(itensNovos)
+  );
+  if (mesFaturaTexto === null) return; // cancelou, nada foi gravado
+  const mesFatura = mesFaturaTexto.trim();
+  if (!/^\d{4}-\d{2}$/.test(mesFatura)) { alert('Formato inválido. Use AAAA-MM, por exemplo 2026-08.'); return; }
+
+  const vencimentoTexto = prompt('Data de vencimento desta fatura (AAAA-MM-DD):', sugerirVencimento(mesFatura, cartao));
+  if (vencimentoTexto === null) return;
+  const vencimentoISO = ImportarFatura.parseDataFatura(vencimentoTexto.trim());
+  if (!vencimentoISO) { alert('Data de vencimento inválida. Use AAAA-MM-DD ou DD/MM/AAAA.'); return; }
+
+  const totalImportado = itensNovos.reduce((s, i) => s + i.valor, 0);
+  const totalSugerido = valorTotalFaturaDetectado !== null ? valorTotalFaturaDetectado : totalImportado;
+  const totalTexto = prompt('Valor TOTAL OFICIAL desta fatura (confira no boleto/fatura do banco):', totalSugerido.toFixed(2).replace('.', ','));
+  if (totalTexto === null) return;
+  const totalOficial = ImportarFatura.parseValorMonetario(totalTexto);
+  if (isNaN(totalOficial) || totalOficial <= 0) { alert('Valor total inválido.'); return; }
+
+  const itensParaGravar = itensNovos.map((item) => ({
+    valor: item.valor,
+    data: item.data,
+    descricao: item.descricao,
+    categoriaId: idCategoriaOutros
+  }));
+
+  // Regra do Valor Total de Segurança (mantida): se o total oficial
+  // confirmado é maior que a soma dos itens reconhecidos linha por linha,
+  // lança a diferença como um ajuste na mesma fatura — garante que a fatura
+  // bate com o valor real do banco mesmo quando alguma linha não foi
+  // reconhecida (por OCR ou por não constar no CSV).
+  const diferenca = totalOficial - totalImportado;
+  if (diferenca > 0.01) {
+    const dataDoAjuste = itensNovos.reduce((maisRecente, item) => item.data > maisRecente ? item.data : maisRecente, itensNovos[0].data);
+    itensParaGravar.push({
+      valor: diferenca,
+      data: dataDoAjuste,
+      descricao: 'Outros Gastos da Fatura (Ajuste)',
+      categoriaId: idCategoriaOutros
     });
-    importadas++;
   }
 
-  // Regra do Valor Total de Segurança: se identificamos o total real da
-  // fatura no texto (via OCR) e ele é maior que a soma das compras que
-  // conseguimos reconhecer linha por linha, lança a diferença como um
-  // ajuste — garante que a fatura na tela bate com o valor real do banco
-  // mesmo quando o OCR pula alguma linha.
-  if (valorTotalFaturaDetectado !== null) {
-    const diferenca = valorTotalFaturaDetectado - totalImportado;
-    if (diferenca > 0.01) {
-      // Usa a MAIOR data entre os itens importados (não "hoje") — assim o
-      // ajuste cai garantidamente no mesmo ciclo de fatura das compras que
-      // ele está compensando, em vez de vazar pro ciclo do mês seguinte
-      const dataDoAjuste = itensParaImportar.length > 0
-        ? itensParaImportar.reduce((maisRecente, item) => item.data > maisRecente ? item.data : maisRecente, itensParaImportar[0].data)
-        : new Date().toISOString();
+  const fechamentoISO = calcularFechamento(mesFatura, cartao.diaFechamento);
 
-      await DB.adicionar('despesa', {
-        valor: diferenca,
-        categoriaId: idCategoriaOutros,
-        cartaoId: idCartaoAtual,
-        data: dataDoAjuste,
-        parcelaAtual: 1,
-        parcelaTotal: 1,
-        descricao: 'Outros Gastos da Fatura (Ajuste OCR)'
-      });
-    }
-  }
+  const resultado = await DB.importarFatura(
+    {
+      cartaoId: idCartaoAtual,
+      mesFatura,
+      vencimento: vencimentoISO,
+      fechamento: fechamentoISO,
+      cicloFim: fechamentoISO,
+      statusPagamento: 'nao_paga',
+      totalOficial
+    },
+    itensParaGravar
+  );
 
-  if (jaExistiam > 0) {
-    alert(`${importadas} compra(s) nova(s) importada(s). ${jaExistiam} já existiam no seu histórico (mesmo valor, data e descrição) e foram puladas, pra não duplicar.`);
-  }
+  let mensagem = `${itensParaGravar.length} lançamento(s) importado(s) pra fatura de ${mesFatura}.`;
+  if (jaExistiam > 0) mensagem += ` ${jaExistiam} já existiam no seu histórico e foram pulados, pra não duplicar.`;
+  if (!resultado.criada) mensagem += ' Já existia uma fatura desse cartão nesse mês — os lançamentos foram vinculados a ela, sem criar fatura duplicada.';
+  alert(mensagem);
 
   itensParaImportar = [];
   valorTotalFaturaDetectado = null;
@@ -420,6 +503,7 @@ async function abrirModalEdicao() {
   aplicarMascaraMoeda(document.getElementById('inputLimiteCartao'));
   definirValorMascarado(document.getElementById('inputLimiteCartao'), cartao.limite);
   document.getElementById('inputVencimentoCartao').value = cartao.diaVencimento;
+  document.getElementById('inputFechamentoCartao').value = cartao.diaFechamento || '';
   document.getElementById('sheetOverlay').classList.add('open');
 }
 
@@ -439,16 +523,20 @@ async function salvarEdicaoCartao() {
   const nome = document.getElementById('inputNomeCartao').value.trim();
   const limite = valorNumericoDoInput(document.getElementById('inputLimiteCartao'));
   const diaVencimento = parseInt(document.getElementById('inputVencimentoCartao').value, 10);
+  // Regra 3 do diagnóstico: fechamento real, digitado — nunca mais
+  // "vencimento - 9".
+  const diaFechamento = parseInt(document.getElementById('inputFechamentoCartao').value, 10);
 
   if (!nome) { alert('Informe o nome do banco.'); return; }
   if (!limite || limite <= 0) { alert('Informe um limite válido.'); return; }
   if (!diaVencimento || diaVencimento < 1 || diaVencimento > 31) { alert('Informe um dia de vencimento válido (1 a 31).'); return; }
+  if (!diaFechamento || diaFechamento < 1 || diaFechamento > 31) { alert('Informe o dia de fechamento real da fatura (1 a 31) — confira na sua fatura do banco.'); return; }
 
   await DB.atualizar('cartao', {
     ...cartao,
     nome,
     limite,
-    diaFechamento: Math.max(1, diaVencimento - 9),
+    diaFechamento,
     diaVencimento
   });
 

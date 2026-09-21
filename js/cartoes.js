@@ -65,11 +65,13 @@ function abrirModalCartao(id) {
       document.getElementById('inputNomeCartao').value = cartao.nome;
       definirValorMascarado(document.getElementById('inputLimiteCartao'), cartao.limite);
       document.getElementById('inputVencimentoCartao').value = cartao.diaVencimento;
+      document.getElementById('inputFechamentoCartao').value = cartao.diaFechamento || '';
     });
   } else {
     document.getElementById('inputNomeCartao').value = '';
     document.getElementById('inputLimiteCartao').value = '';
     document.getElementById('inputVencimentoCartao').value = '';
+    document.getElementById('inputFechamentoCartao').value = '';
   }
   document.getElementById('sheetOverlay').classList.add('open');
 }
@@ -86,12 +88,17 @@ async function salvarCartao() {
   const nome = document.getElementById('inputNomeCartao').value.trim();
   const limite = valorNumericoDoInput(document.getElementById('inputLimiteCartao'));
   const diaVencimento = parseInt(document.getElementById('inputVencimentoCartao').value, 10);
+  // Regra 3 do diagnóstico: o fechamento real nunca é mais calculado como
+  // "vencimento - 9" — é sempre o dia que a usuária digita, conferido na
+  // fatura de verdade do banco.
+  const diaFechamento = parseInt(document.getElementById('inputFechamentoCartao').value, 10);
 
   if (!nome) { alert('Informe o nome do banco.'); return; }
   if (!limite || limite <= 0) { alert('Informe um limite válido.'); return; }
   if (!diaVencimento || diaVencimento < 1 || diaVencimento > 31) { alert('Informe um dia de vencimento válido (1 a 31).'); return; }
+  if (!diaFechamento || diaFechamento < 1 || diaFechamento > 31) { alert('Informe o dia de fechamento real da fatura (1 a 31) — confira na sua fatura do banco.'); return; }
 
-  const dados = { nome, limite, diaFechamento: Math.max(1, diaVencimento - 9), diaVencimento };
+  const dados = { nome, limite, diaFechamento, diaVencimento };
 
   if (idCartaoEmEdicao) {
     const cartaoAtual = await DB.obterPorId('cartao', idCartaoEmEdicao);

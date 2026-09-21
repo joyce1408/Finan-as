@@ -190,6 +190,16 @@ async function migrarFaturasParaV5() {
   const mapaCartao = Object.fromEntries(cartoes.map((c) => [c.id, c]));
   const mesAtual = mesAtualISO();
 
+  // Correção da causa raiz 2 do diagnóstico: nunca criar uma segunda fatura
+  // pro mesmo cartaoId + mesFatura. Mantém um mapa "cartaoId|mesFatura" das
+  // faturas que já existem (importadas OU migradas, pagas OU não) — carregado
+  // de novo aqui porque faturasExistentes (lá em cima) pode já estar
+  // desatualizado depois do passo de "refazer". Esse mapa é atualizado à
+  // medida que despesas pendentes vão sendo linkadas/agrupadas abaixo, pra
+  // que duas despesas pendentes do mesmo grupo nunca gerem duas faturas.
+  const faturasAtuais = await listarTodos('fatura');
+  const mapaFaturaPorChave = new Map(faturasAtuais.map((f) => [`${f.cartaoId}|${f.mesFatura}`, f]));
+
   // agrupa cada despesa de cartão pelo MÊS DE FECHAMENTO estimado (não é o
   // mesFatura/competência — são conceitos diferentes, ver abaixo): comprou
   // até o dia de fechamento estimado → fecha no próprio mês da compra;
@@ -239,11 +249,31 @@ async function migrarFaturasParaV5() {
     // mesFatura (competência/statement) é diferente do mês de fechamento —
     // essa regra (fechamento - 1 mês) é uma ESTIMATIVA exclusiva da migração
     // histórica, porque não temos o mesFatura real confirmado por ninguém.
-    // Fatura importada de verdade (fluxo futuro) usa o mesFatura que o
-    // usuário informar/confirmar, nunca esse cálculo.
+    // Fatura importada de verdade (DB.importarFatura) usa o mesFatura que o
+    // usuário informou/confirmou, nunca esse cálculo.
     const mesFatura = somarMesISO(mesFechamento, -1);
 
     const totalEstimado = despesasDoGrupo.reduce((soma, d) => soma + d.valor, 0);
+    const chaveFatura = `${cartaoId}|${mesFatura}`;
+    const faturaExistente = mapaFaturaPorChave.get(chaveFatura);
+
+    if (faturaExistente) {
+      // Já existe fatura pra esse cartão + mês (importada ou migrada, paga ou
+      // não) — nunca cria uma segunda. Só vincula as despesas pendentes a
+      // ela. Se a fatura já existente for 'importada', totalOficial é dado
+      // real confirmado pelo usuário e NUNCA é sobrescrito aqui. Se for
+      // 'migrada', o total ainda é só uma soma do que existe, então é seguro
+      // atualizar somando as despesas que estão entrando agora.
+      for (const d of despesasDoGrupo) {
+        await atualizar('despesa', { ...d, faturaId: faturaExistente.id });
+      }
+      if (faturaExistente.origem === 'migrada') {
+        const atualizada = { ...faturaExistente, totalOficial: faturaExistente.totalOficial + totalEstimado };
+        await atualizar('fatura', atualizada);
+        mapaFaturaPorChave.set(chaveFatura, atualizada);
+      }
+      continue;
+    }
 
     const novaFaturaId = await adicionar('fatura', {
       cartaoId,
@@ -260,7 +290,89 @@ async function migrarFaturasParaV5() {
     for (const d of despesasDoGrupo) {
       await atualizar('despesa', { ...d, faturaId: novaFaturaId });
     }
+    mapaFaturaPorChave.set(chaveFatura, { id: novaFaturaId, cartaoId, mesFatura, totalOficial: totalEstimado, origem: 'migrada' });
   }
+}
+
+// ---------- Importação de fatura real (Despesa → Fatura → Cartão, regra 1) ----------
+// Diferente da migração acima (que só ESTIMA e reconstrói o passado), essa
+// função é o caminho de dado real: cria (ou reaproveita) a fatura com o
+// mesFatura que o usuário confirmou, nunca uma estimativa, e já vincula o
+// faturaId nas despesas no mesmo instante em que elas são gravadas — não
+// depende de nenhuma migração posterior pra descobrir a qual fatura elas
+// pertencem.
+async function faturaExistenteParaCartaoMes(cartaoId, mesFatura) {
+  const todas = await listarTodos('fatura');
+  return todas.find((f) => f.cartaoId === cartaoId && f.mesFatura === mesFatura) || null;
+}
+
+// dadosFatura: { cartaoId, mesFatura, vencimento, fechamento, cicloInicio,
+// cicloFim, totalOficial, statusPagamento } — mesFatura é o dado informado/
+// confirmado pelo usuário na importação, nunca calculado a partir da data das
+// compras. itens: [{ valor, data, descricao, categoriaId, parcelaAtual,
+// parcelaTotal, idParcelamento }] — cada item vira uma despesa já com
+// faturaId, cartaoId e statusDespesa: 'confirmado' preenchidos.
+//
+// Se já existir uma fatura pra esse cartaoId + mesFatura (regra 2: nunca
+// duplicar), os itens são vinculados a ela em vez de criar uma nova; o
+// totalOficial informado atualiza a fatura existente (é sempre o dado mais
+// recente confirmado pelo usuário), mas statusPagamento e origem da fatura
+// existente NUNCA são alterados aqui — marcar uma fatura como paga é uma ação
+// separada (marcarFaturaComoPaga) e não pode ser desfeita por uma nova
+// importação.
+async function importarFatura(dadosFatura, itens) {
+  const { cartaoId, mesFatura } = dadosFatura;
+  if (!cartaoId) throw new Error('importarFatura: cartaoId é obrigatório');
+  if (!mesFatura || !/^\d{4}-\d{2}$/.test(mesFatura)) throw new Error('importarFatura: mesFatura precisa estar no formato AAAA-MM');
+
+  const existente = await faturaExistenteParaCartaoMes(cartaoId, mesFatura);
+  let faturaId;
+  let criada;
+
+  if (existente) {
+    faturaId = existente.id;
+    criada = false;
+    const atualizacao = { ...existente };
+    if (dadosFatura.totalOficial !== undefined && dadosFatura.totalOficial !== null) atualizacao.totalOficial = dadosFatura.totalOficial;
+    if (dadosFatura.vencimento) atualizacao.vencimento = dadosFatura.vencimento;
+    if (dadosFatura.fechamento) atualizacao.fechamento = dadosFatura.fechamento;
+    if (dadosFatura.cicloFim) atualizacao.cicloFim = dadosFatura.cicloFim;
+    await atualizar('fatura', atualizacao);
+  } else {
+    faturaId = await adicionar('fatura', {
+      cartaoId,
+      mesFatura,
+      cicloInicio: dadosFatura.cicloInicio ?? null,
+      cicloFim: dadosFatura.cicloFim ?? dadosFatura.fechamento ?? null,
+      fechamento: dadosFatura.fechamento ?? null,
+      vencimento: dadosFatura.vencimento,
+      totalOficial: dadosFatura.totalOficial ?? 0,
+      statusPagamento: dadosFatura.statusPagamento || 'nao_paga',
+      origem: 'importada'
+    });
+    criada = true;
+  }
+
+  const despesaIds = [];
+  for (const item of itens || []) {
+    const id = await adicionar('despesa', {
+      valor: item.valor,
+      categoriaId: item.categoriaId,
+      cartaoId,
+      faturaId,
+      formaPagamento: 'cartao',
+      data: item.data,
+      descricao: item.descricao || '',
+      parcelaAtual: item.parcelaAtual ?? 1,
+      parcelaTotal: item.parcelaTotal ?? 1,
+      idParcelamento: item.idParcelamento ?? null,
+      statusDespesa: item.statusDespesa || 'confirmado',
+      editadoManualmente: false
+    });
+    despesaIds.push(id);
+  }
+
+  return { faturaId, criada, despesaIds };
 }
 
 function fecharBanco() {
@@ -472,6 +584,34 @@ async function gastosPorCategoria(mesISO = mesAtualISO()) {
 async function totalGastoNoMes(mesISO = mesAtualISO()) {
   const categorias = await gastosPorCategoria(mesISO);
   return categorias.reduce((soma, c) => soma + c.total, 0);
+}
+
+// ---------- Histórico mensal (regra 5) ----------
+// Lista todos os meses "AAAA-MM" entre mesInicioISO e mesFimISO, inclusive,
+// em ordem crescente. Não assume nada sobre o tamanho do intervalo.
+function mesesEntre(mesInicioISO, mesFimISO) {
+  const meses = [];
+  let atual = mesInicioISO;
+  let guarda = 0; // trava de segurança pra nunca entrar em loop infinito
+  while (atual <= mesFimISO && guarda < 1000) {
+    meses.push(atual);
+    atual = somarMesISO(atual, 1);
+    guarda++;
+  }
+  return meses;
+}
+
+// Total gasto por COMPETÊNCIA FINANCEIRA, mês a mês, respeitando a mesma
+// regra definitiva de sempre: despesa de cartão com faturaId usa
+// fatura.mesFatura; sem faturaId usa a data real; só despesas confirmadas
+// entram. Reaproveita totalGastoNoMes (já correto) pra cada mês do
+// intervalo — não recalcula a regra de competência de novo. Usado pela visão
+// "Julho/2026, Agosto/2026, Setembro/2026..." em Relatórios, que é uma visão
+// ADICIONAL — não substitui o gráfico diário do mês atual.
+async function historicoGastosMensais(mesInicioISO, mesFimISO = mesAtualISO()) {
+  const meses = mesesEntre(mesInicioISO, mesFimISO);
+  const totais = await Promise.all(meses.map((mesISO) => totalGastoNoMes(mesISO)));
+  return meses.map((mesISO, i) => ({ mesISO, total: totais[i] }));
 }
 
 // Evolução diária: o eixo continua sendo o DIA REAL da transação (isso não
@@ -756,7 +896,7 @@ async function importarDadosCompletos(dados) {
   }
 }
 
-window.DB = {
+const DB = {
   abrirBanco, fecharBanco, apagarBancoCompleto, limparStore, seedInicial, adicionar, listarTodos, obterPorId, atualizar, remover,
   gastosDoMes, gastosPorCategoria, totalGastoNoMes, gastosDiariosDoMes, parcelasProximoMes,
   rendaAtual, receitasDoMes, totalReceitasAvulsasNoMes, entradasTotaisDoMes,
@@ -764,5 +904,10 @@ window.DB = {
   marcarFaturaComoPaga, desmarcarFaturaComoPaga,
   mesAtualISO, mesAnteriorISO, somarMesISO, despesasDetalhadas, totalDespesasEntre, houveDespesaHoje,
   adicionarAporte, historicoAportes, despesasAVistaDoMes, saidasConfirmadasDoMes, saldoDisponivelDoMes,
-  competenciaDespesa, removerDespesasDuplicadas, importarDadosCompletos
+  competenciaDespesa, removerDespesasDuplicadas, importarDadosCompletos,
+  faturaExistenteParaCartaoMes, importarFatura, migrarFaturasParaV5, migrarDespesasParaV4,
+  mesesEntre, historicoGastosMensais
 };
+
+if (typeof window !== 'undefined') window.DB = DB;
+if (typeof module !== 'undefined') module.exports = DB;

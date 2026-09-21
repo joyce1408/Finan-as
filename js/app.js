@@ -410,14 +410,25 @@ async function salvarDespesa() {
   const [ano, mes, dia] = dataEscolhida.split('-').map(Number);
   const dataFinal = dataEscolhida ? new Date(ano, mes - 1, dia).toISOString() : new Date().toISOString();
 
+  // Regra 4 do diagnóstico: uma despesa cadastrada aqui já aconteceu de
+  // verdade (não é previsão), então statusDespesa já entra como 'confirmado'
+  // na hora — sem isso, ela ficava invisível em Home/Relatórios/Categorias
+  // até o app inteiro ser recarregado (só aí a migração preenchia o campo).
+  // faturaId fica null: essa despesa ainda não está vinculada a nenhuma
+  // fatura real (isso só acontece via importação, DB.importarFatura); até lá
+  // a competência dela é a própria data real (ver competenciaDespesa em db.js).
   await DB.adicionar('despesa', {
     valor,
     categoriaId: categoriaSelecionadaId,
     cartaoId: formaPagamentoSelecionada === 'cartao' ? cartaoSelecionadoId : null,
+    faturaId: null,
     formaPagamento: formaPagamentoSelecionada,
     data: dataFinal,
     parcelaAtual: 1,
     parcelaTotal: 1,
+    idParcelamento: null,
+    statusDespesa: 'confirmado',
+    editadoManualmente: false,
     descricao: ''
   });
 

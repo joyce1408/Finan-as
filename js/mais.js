@@ -145,7 +145,10 @@ async function salvarModalValor() {
 }
 
 async function exportarDados() {
-  const stores = ['categoria', 'cartao', 'despesa', 'renda', 'reserva', 'receita'];
+  // 'fatura' faltava aqui desde a v5 do schema (Despesa → Fatura → Cartão) —
+  // sem ela, o backup nunca incluía mesFatura/statusPagamento/origem, só as
+  // despesas com o faturaId apontando pro nada depois de um restore.
+  const stores = ['categoria', 'cartao', 'despesa', 'renda', 'reserva', 'receita', 'fatura'];
   const dump = {};
   for (const s of stores) dump[s] = await DB.listarTodos(s);
 
