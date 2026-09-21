@@ -23,7 +23,24 @@
 
 .search-bar input::placeholder { color: var(--ink-soft); }
 
-.filters { display: flex; gap: 8px; margin-bottom: 20px; overflow-x: auto; }
+/* Regra 18 da revisão: a linha de filtros (Todas/Cartão/Dinheiro-Pix/
+   Receitas/Período) pode ter mais chips do que cabem na largura do celular.
+   Em vez de deixar o último chip (Período) espremido/cortado exatamente na
+   borda do card, a faixa "sangra" pra fora do padding de .screen (margin
+   negativo) e devolve esse respiro como padding — assim o scroll horizontal
+   tem espaço de sobra dos dois lados e QUALQUER chip, incluindo o último,
+   fica 100% acessível arrastando, nunca cortado. Nenhum filtro foi removido. */
+.filters {
+  display: flex;
+  gap: 8px;
+  margin: 0 -22px 20px;
+  padding: 2px 22px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.filters::-webkit-scrollbar { display: none; }
 
 .filter-chip {
   flex-shrink: 0;
