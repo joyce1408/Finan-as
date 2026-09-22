@@ -145,6 +145,8 @@
   cursor: pointer;
 }
 .acao-fatura-paga-btn.desmarcar { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); }
+.acao-fatura-paga-btn.corrigir { background: transparent; }
+.acao-fatura-paga-btn + .acao-fatura-paga-btn { margin-left: 8px; }
 
 .tag-previsto {
   display: inline-block;
