@@ -88,6 +88,12 @@
         <div class="menu-label">Exportar meus dados</div>
         <span class="menu-chevron">›</span>
       </div>
+      <div class="menu-item clickable" onclick="document.getElementById('inputBackupRestaurar').click()">
+        <div class="menu-icon">♻️</div>
+        <div class="menu-label">Restaurar backup</div>
+        <span class="menu-chevron">›</span>
+      </div>
+      <input type="file" id="inputBackupRestaurar" accept=".json,application/json" style="display:none" onchange="arquivoBackupSelecionado(event)">
       <div class="menu-item clickable" onclick="apagarTudo()">
         <div class="menu-icon">🗑️</div>
         <div class="menu-label danger-text">Apagar todos os dados</div>
@@ -103,6 +109,17 @@
     <a href="transacoes.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">⇄</span>Transações</a>
     <a href="relatorios.html" class="tab-item" style="text-decoration:none"><span class="tab-icon">◔</span>Relatórios</a>
     <div class="tab-item active"><span class="tab-icon">⋯</span>Mais</div>
+  </div>
+</div>
+
+<!-- Modal do relatório de restauração de backup -->
+<div class="sheet-overlay" id="sheetOverlayRestauracao">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="tituloRestauracao">Restaurar backup</div>
+    <div id="corpoRestauracao" style="font-size:12.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;font-family:ui-monospace,monospace;max-height:50vh;overflow-y:auto;background:var(--bg,#F5F6FA);border-radius:12px;padding:12px;margin-bottom:14px"></div>
+    <button class="save-btn" id="botaoConfirmarRestauracao" style="display:none" onclick="confirmarSubstituicaoBackup()">Substituir tudo pelo backup</button>
+    <button class="save-btn" style="background:transparent;color:var(--ink-soft);border:1px solid var(--border);margin-top:8px" onclick="fecharModalRestauracao()">Fechar</button>
   </div>
 </div>
 
