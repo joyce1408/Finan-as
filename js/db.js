@@ -1102,27 +1102,178 @@ async function removerDespesasDuplicadas() {
   return idsParaRemover.length;
 }
 
-// Importa um backup completo (gerado por "Exportar meus dados") — apaga tudo
-// que existe no aparelho atual e recria exatamente como estava no backup,
-// preservando os IDs originais pra manter as relações entre despesa/cartão/
-// categoria intactas. Usado pra "clonar" o estado de um aparelho no outro,
-// já que não existe sincronização automática (o app é 100% local).
-async function importarDadosCompletos(dados) {
-  await apagarBancoCompleto();
-  await abrirBanco(); // reabre já recriando os object stores vazios
+// Importa um backup completo (gerado por "Exportar meus dados") — recria
+// exatamente como estava no backup, preservando os IDs originais pra manter
+// as relações entre despesa/cartão/categoria/fatura intactas. Usado tanto
+// pra "clonar" o estado de um aparelho no outro quanto pra restaurar depois
+// de uma limpeza de dados do navegador (já que não existe sincronização
+// automática — o app é 100% local).
+//
+// ORDEM restaurada: categoria, cartao, renda, reserva, receita, fatura,
+// despesa, aporte. 'fatura' e 'aporte' precisam estar aqui — antes desta
+// correção a lista não incluía 'fatura', então um backup restaurado por
+// esta função perdia silenciosamente mesFatura/totalOficial/statusPagamento/
+// origem de toda fatura (Despesa → Fatura → Cartão), mesmo já estando
+// corretamente presentes no JSON exportado (exportarDados, em mais.js, já
+// inclui 'fatura' desde antes desta correção).
+const STORES_RESTAURAVEIS = ['categoria', 'cartao', 'renda', 'reserva', 'receita', 'fatura', 'despesa', 'aporte'];
+// 'aporte' é opcional: a versão atual de exportarDados ainda não o inclui,
+// então um backup real pode legitimamente não trazer essa store.
+const STORES_OBRIGATORIAS_BACKUP = ['categoria', 'cartao', 'despesa', 'renda', 'reserva', 'receita', 'fatura'];
 
-  const ordem = ['categoria', 'cartao', 'renda', 'reserva', 'receita', 'despesa'];
-  for (const nomeStore of ordem) {
-    const registros = dados[nomeStore] || [];
-    for (const registro of registros) {
-      const store = await transacao(nomeStore, 'readwrite');
-      await new Promise((resolve, reject) => {
-        const req = store.add(registro);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
+// Valida a estrutura do JSON inteiro ANTES de qualquer escrita no banco.
+// Não corrige nem inventa nada — só aponta o que está fora do esperado.
+function validarBackup(dados) {
+  const erros = [];
+  if (!dados || typeof dados !== 'object' || Array.isArray(dados)) {
+    return { valido: false, erros: ['O arquivo não é um objeto JSON de backup válido.'] };
+  }
+
+  for (const nomeStore of STORES_OBRIGATORIAS_BACKUP) {
+    if (!(nomeStore in dados)) {
+      erros.push(`Store obrigatória ausente no backup: "${nomeStore}".`);
+      continue;
+    }
+    if (!Array.isArray(dados[nomeStore])) {
+      erros.push(`Store "${nomeStore}" precisa ser uma lista (array) no backup — veio ${typeof dados[nomeStore]}.`);
+      continue;
+    }
+    for (const registro of dados[nomeStore]) {
+      if (!registro || typeof registro !== 'object' || registro.id === undefined || registro.id === null) {
+        erros.push(`Existe um registro sem "id" válido na store "${nomeStore}" — não dá pra preservar relacionamentos sem o id original.`);
+        break;
+      }
     }
   }
+
+  if (dados.aporte !== undefined && !Array.isArray(dados.aporte)) {
+    erros.push('Store "aporte" está presente no backup mas não é uma lista (array).');
+  }
+
+  // Integridade relacional: toda despesa.cartaoId/categoriaId/faturaId,
+  // quando presente, precisa apontar pra um id que existe dentro do PRÓPRIO
+  // backup — só avisa, nunca corrige ou remove nada sozinho.
+  if (Array.isArray(dados.despesa) && Array.isArray(dados.cartao) && Array.isArray(dados.categoria) && Array.isArray(dados.fatura)) {
+    const idsCartao = new Set(dados.cartao.map((c) => c.id));
+    const idsCategoria = new Set(dados.categoria.map((c) => c.id));
+    const idsFatura = new Set(dados.fatura.map((f) => f.id));
+    for (const d of dados.despesa) {
+      if (d.cartaoId != null && !idsCartao.has(d.cartaoId)) erros.push(`despesa id ${d.id}: cartaoId ${d.cartaoId} não existe entre os cartões do backup.`);
+      if (d.categoriaId != null && !idsCategoria.has(d.categoriaId)) erros.push(`despesa id ${d.id}: categoriaId ${d.categoriaId} não existe entre as categorias do backup.`);
+      if (d.faturaId != null && !idsFatura.has(d.faturaId)) erros.push(`despesa id ${d.id}: faturaId ${d.faturaId} não existe entre as faturas do backup.`);
+    }
+  }
+
+  return { valido: erros.length === 0, erros };
+}
+
+async function contagemPorStore() {
+  const contagem = {};
+  for (const nomeStore of STORES_RESTAURAVEIS) {
+    contagem[nomeStore] = (await listarTodos(nomeStore)).length;
+  }
+  return contagem;
+}
+
+// Monta um retrato genérico (sem citar nenhum banco específico) das faturas
+// e das séries de parcelamento restauradas, pra dar pra usuária conferir
+// visualmente os valores reais contra o backup — nunca afirma um valor
+// esperado, só mostra o que está gravado.
+async function relatorioFaturasEParcelamentos() {
+  const [faturas, despesas] = await Promise.all([listarTodos('fatura'), listarTodos('despesa')]);
+  const listaFaturas = faturas.map((f) => ({
+    id: f.id, cartaoId: f.cartaoId, mesFatura: f.mesFatura,
+    totalOficial: f.totalOficial, statusPagamento: f.statusPagamento, origem: f.origem,
+    fechamento: f.fechamento, vencimento: f.vencimento
+  }));
+
+  const series = new Map();
+  for (const d of despesas) {
+    if (!(d.parcelaTotal > 1)) continue;
+    const chave = d.idParcelamento ?? `sem-idParcelamento-${d.id}`;
+    if (!series.has(chave)) series.set(chave, []);
+    series.get(chave).push({
+      id: d.id, parcelaAtual: d.parcelaAtual, parcelaTotal: d.parcelaTotal,
+      statusDespesa: d.statusDespesa, valor: d.valor, data: d.data, faturaId: d.faturaId
+    });
+  }
+  const listaSeries = [...series.entries()].map(([idParcelamento, parcelas]) => ({
+    idParcelamento,
+    parcelas: parcelas.sort((a, b) => a.parcelaAtual - b.parcelaAtual)
+  }));
+
+  return { faturas: listaFaturas, seriesDeParcelamento: listaSeries };
+}
+
+// Restaura um backup completo. Regras (pedido explícito da usuária):
+// 1) valida o JSON inteiro antes de escrever qualquer coisa;
+// 2) se o banco atual já tiver QUALQUER dado, não sobrescreve sozinho —
+//    devolve status 'aguardando_confirmacao' com as contagens dos dois
+//    lados, e só substitui de fato quando chamada de novo com
+//    confirmarSubstituicao:true (segunda ação explícita da usuária na UI);
+// 3) preserva IDs originais (usa put via atualizar(), nunca gera um id novo);
+// 4) não recalcula valor nem altera data de nenhum registro;
+// 5) depois de escrever os dados, reprocessa as migrações existentes (na
+//    mesma ordem que abrirBanco() já usa) — elas já tinham rodado contra o
+//    banco vazio antes da restauração, então precisam rodar de novo agora
+//    que os dados reais estão lá. Todas as três são idempotentes (mesma
+//    trava de sempre, nunca duplicam).
+// 6) NUNCA chama indexedDB.deleteDatabase() (nem via apagarBancoCompleto) —
+//    mesmo na substituição já confirmada, a limpeza é feita store a store
+//    com limparStore() (delete registro a registro, a mesma função que já
+//    existe pra "Limpar despesas de exemplo"), nunca apagando o banco inteiro.
+async function restaurarBackup(dados, opcoes = {}) {
+  const confirmarSubstituicao = opcoes.confirmarSubstituicao === true;
+
+  const validacao = validarBackup(dados);
+  if (!validacao.valido) {
+    return { status: 'invalido', erros: validacao.erros };
+  }
+
+  await abrirBanco();
+  const contagemAtual = await contagemPorStore();
+  const existeDadoAtual = Object.values(contagemAtual).some((n) => n > 0);
+
+  if (existeDadoAtual && !confirmarSubstituicao) {
+    const contagemBackup = {};
+    for (const nomeStore of STORES_RESTAURAVEIS) contagemBackup[nomeStore] = (dados[nomeStore] || []).length;
+    return { status: 'aguardando_confirmacao', contagemAtual, contagemBackup };
+  }
+
+  if (existeDadoAtual) {
+    for (const nomeStore of STORES_RESTAURAVEIS) await limparStore(nomeStore);
+  }
+
+  const contagemRestaurada = {};
+  for (const nomeStore of STORES_RESTAURAVEIS) {
+    const registros = dados[nomeStore] || [];
+    for (const registro of registros) {
+      await atualizar(nomeStore, registro); // put — preserva o id original, nunca gera um novo
+    }
+    contagemRestaurada[nomeStore] = registros.length;
+  }
+
+  const despesasAntesDaMigracao = (await listarTodos('despesa')).length;
+  await migrarDespesasParaV4();
+  await migrarFaturasParaV5();
+  await migrarParcelamentosExistentes();
+  const despesasDepoisDaMigracao = (await listarTodos('despesa')).length;
+
+  const contagemDepois = await contagemPorStore();
+  const relatorioFaturas = await relatorioFaturasEParcelamentos();
+
+  return {
+    status: 'restaurado',
+    contagemAntes: contagemAtual,
+    contagemRestaurada,
+    contagemDepois,
+    parcelasGeradasPelaMigracao: despesasDepoisDaMigracao - despesasAntesDaMigracao,
+    ...relatorioFaturas
+  };
+}
+
+async function importarDadosCompletos(dados) {
+  return restaurarBackup(dados, { confirmarSubstituicao: true });
 }
 
 const DB = {
@@ -1135,7 +1286,8 @@ const DB = {
   adicionarAporte, historicoAportes, despesasAVistaDoMes, saidasConfirmadasDoMes, saldoDisponivelDoMes,
   competenciaDespesa, removerDespesasDuplicadas, importarDadosCompletos,
   faturaExistenteParaCartaoMes, importarFatura, migrarFaturasParaV5, migrarDespesasParaV4,
-  mesesEntre, historicoGastosMensais, migrarParcelamentosExistentes, extrairParcelaDaDescricao
+  mesesEntre, historicoGastosMensais, migrarParcelamentosExistentes, extrairParcelaDaDescricao,
+  validarBackup, restaurarBackup, contagemPorStore, relatorioFaturasEParcelamentos
 };
 
 if (typeof window !== 'undefined') window.DB = DB;

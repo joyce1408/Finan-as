@@ -163,6 +163,116 @@ async function exportarDados() {
   URL.revokeObjectURL(url);
 }
 
+// ---------- Restaurar backup (recuperação de dados) ----------
+// Guarda o JSON já lido/parseado enquanto a usuária decide (na tela de
+// confirmação) se quer substituir os dados atuais — evita reabrir o
+// seletor de arquivo de novo só pra confirmar.
+let dadosBackupPendente = null;
+
+function abrirModalRestauracao(titulo) {
+  document.getElementById('tituloRestauracao').textContent = titulo;
+  document.getElementById('sheetOverlayRestauracao').classList.add('open');
+}
+
+function fecharModalRestauracao() {
+  document.getElementById('sheetOverlayRestauracao').classList.remove('open');
+  document.getElementById('botaoConfirmarRestauracao').style.display = 'none';
+}
+
+async function arquivoBackupSelecionado(event) {
+  const arquivo = event.target.files[0];
+  event.target.value = ''; // permite selecionar o mesmo arquivo de novo depois, se precisar
+  if (!arquivo) return;
+
+  let dados;
+  try {
+    const texto = await arquivo.text();
+    dados = JSON.parse(texto);
+  } catch (e) {
+    abrirModalRestauracao('Não deu pra ler o arquivo');
+    document.getElementById('corpoRestauracao').textContent =
+      `O arquivo selecionado não é um JSON válido.\n\nErro técnico: ${e.message}\n\nNenhum dado foi alterado no app — nada foi escrito no banco.`;
+    return;
+  }
+
+  await processarRestauracao(dados, false);
+}
+
+async function processarRestauracao(dados, confirmarSubstituicao) {
+  const resultado = await DB.restaurarBackup(dados, { confirmarSubstituicao });
+
+  if (resultado.status === 'invalido') {
+    dadosBackupPendente = null;
+    abrirModalRestauracao('Backup inválido — nada foi alterado');
+    document.getElementById('corpoRestauracao').textContent =
+      'O arquivo não passou na validação e NADA foi escrito no banco:\n\n' +
+      resultado.erros.map((e) => `• ${e}`).join('\n');
+    return;
+  }
+
+  if (resultado.status === 'aguardando_confirmacao') {
+    dadosBackupPendente = dados;
+    abrirModalRestauracao('Já existem dados neste iPhone');
+    const linhas = [
+      'O banco atual deste iPhone já tem registros. Pra nunca sobrescrever nada sem confirmação, a restauração foi INTERROMPIDA — nada foi apagado ou alterado ainda.',
+      '',
+      'Dados ATUAIS neste iPhone:',
+      ...Object.entries(resultado.contagemAtual).map(([s, n]) => `  ${s}: ${n}`),
+      '',
+      'Dados NO BACKUP selecionado:',
+      ...Object.entries(resultado.contagemBackup).map(([s, n]) => `  ${s}: ${n}`),
+      '',
+      'Se continuar, TODOS os dados atuais acima serão substituídos pelos dados do backup (nunca mesclados). Só confirme se tiver certeza de que o backup é a versão que você quer manter.'
+    ];
+    document.getElementById('corpoRestauracao').textContent = linhas.join('\n');
+    document.getElementById('botaoConfirmarRestauracao').style.display = 'block';
+    return;
+  }
+
+  // status === 'restaurado'
+  dadosBackupPendente = null;
+  abrirModalRestauracao('Backup restaurado');
+  document.getElementById('botaoConfirmarRestauracao').style.display = 'none';
+  document.getElementById('corpoRestauracao').textContent = montarRelatorioFinal(resultado);
+  await renderMais();
+}
+
+async function confirmarSubstituicaoBackup() {
+  if (!dadosBackupPendente) return;
+  await processarRestauracao(dadosBackupPendente, true);
+}
+
+function montarRelatorioFinal(r) {
+  const linhas = [
+    'Restauração concluída.',
+    '',
+    'Registros restaurados por store (preservando os IDs originais do backup):',
+    ...Object.entries(r.contagemRestaurada).map(([s, n]) => `  ${s}: ${n}`),
+    '',
+    `Total de registros no banco depois da restauração:`,
+    ...Object.entries(r.contagemDepois).map(([s, n]) => `  ${s}: ${n}`),
+    '',
+    `Parcelas futuras geradas pela migração (migrarParcelamentosExistentes): ${r.parcelasGeradasPelaMigracao}`,
+    '',
+    'Faturas restauradas (confira os valores/datas contra o backup — nada aqui foi inventado ou corrigido):'
+  ];
+  for (const f of r.faturas) {
+    linhas.push(`  fatura id ${f.id} · cartaoId ${f.cartaoId} · mesFatura ${f.mesFatura} · total R$ ${Number(f.totalOficial).toFixed(2)} · ${f.statusPagamento} · origem ${f.origem}`);
+    linhas.push(`    fechamento ${f.fechamento ? new Date(f.fechamento).toLocaleDateString('pt-BR') : '—'} · vencimento ${f.vencimento ? new Date(f.vencimento).toLocaleDateString('pt-BR') : '—'}`);
+  }
+  linhas.push('');
+  linhas.push('Séries de parcelamento restauradas/migradas:');
+  for (const serie of r.seriesDeParcelamento) {
+    linhas.push(`  idParcelamento ${serie.idParcelamento}:`);
+    for (const p of serie.parcelas) {
+      linhas.push(`    ${p.parcelaAtual}/${p.parcelaTotal} · R$ ${Number(p.valor).toFixed(2)} · ${p.data.slice(0, 10)} · ${p.statusDespesa} · faturaId ${p.faturaId ?? '—'}`);
+    }
+  }
+  linhas.push('');
+  linhas.push('Confira: cada valor/data/status acima precisa bater exatamente com o que está no arquivo de backup. Nenhum valor ou data real foi recalculado nesta restauração.');
+  return linhas.join('\n');
+}
+
 async function apagarTudo() {
   const ok = confirm('Isso vai apagar PERMANENTEMENTE todos os seus dados financeiros deste iPhone. Essa ação não pode ser desfeita. Deseja continuar?');
   if (!ok) return;
