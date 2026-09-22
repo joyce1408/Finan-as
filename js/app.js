@@ -51,6 +51,24 @@ function formatarMoeda(valor) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+// Decide a tag visual (classe CSS + texto) de uma fatura na Home, a partir
+// EXCLUSIVAMENTE do que faturasClassificadas() já calculou (f.situacao/
+// f.diasRestantes) — nunca lê nem altera statusPagamento diretamente aqui.
+// Correção da revisão: o ramo "Não paga" (situacao 'proxima', mais de 12
+// dias pro vencimento) estava usando a classe 'tag-ok' — a MESMA classe
+// verde/sucesso usada pra "✅ Paga" — fazendo os dois estados aparecerem
+// com a cor idêntica. Trocado pra 'tag-urgent' (vermelho/alerta), já que
+// qualquer fatura não paga precisa ser vermelha, nunca verde. 'Vence logo'
+// (tag-urgent) e 'Em breve' (tag-soon) não fazem parte desse bug — já eram
+// distintas de 'Paga' — e continuam exatamente como estavam.
+function tagFaturaHome(f) {
+  if (f.situacao === 'quitada') return { classe: 'tag-ok', texto: '✅ Paga' };
+  if (f.situacao === 'vencida') return { classe: 'tag-urgent', texto: '🔴 Vencida' };
+  if (f.diasRestantes <= 5) return { classe: 'tag-urgent', texto: 'Vence logo' };
+  if (f.diasRestantes <= 12) return { classe: 'tag-soon', texto: 'Em breve' };
+  return { classe: 'tag-urgent', texto: 'Não paga' };
+}
+
 async function renderHome() {
   const agora = new Date();
   const nome = localStorage.getItem('ffjoyce2026_nome_usuaria') || 'Joyce Pinheiro';
@@ -117,19 +135,13 @@ async function renderHome() {
   const faturasParaMostrar = [...naoPagas, ...pagas].slice(0, 3);
 
   for (const f of faturasParaMostrar) {
-    let tag, textoData;
+    const tag = tagFaturaHome(f);
+    let textoData;
     if (f.situacao === 'quitada') {
-      tag = { classe: 'tag-ok', texto: '✅ Paga' };
       textoData = `Fatura de ${f.mesFatura} · paga`;
     } else if (f.situacao === 'vencida') {
-      tag = { classe: 'tag-urgent', texto: '🔴 Vencida' };
       textoData = `Venceu há ${Math.abs(f.diasRestantes)} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
     } else {
-      tag = f.diasRestantes <= 5
-        ? { classe: 'tag-urgent', texto: 'Vence logo' }
-        : f.diasRestantes <= 12
-          ? { classe: 'tag-soon', texto: 'Em breve' }
-          : { classe: 'tag-ok', texto: 'Não paga' };
       textoData = `Vence em ${f.diasRestantes} dias · ${f.vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
     }
     const iniciais = f.cartaoNome.slice(0, 2).toUpperCase();

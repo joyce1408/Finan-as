@@ -116,6 +116,22 @@ function rotuloCompetenciaSeDiferente(item) {
   return ` · competência: ${nomeMes}`;
 }
 
+// Ordena a lista unificada por data decrescente. Quando duas datas empatam
+// (ex.: uma parcela confirmada e a prevista seguinte, ambas projetadas pro
+// mesmo dia — 8/12 real em 12/09 e 9/12 prevista também caindo em 12/09),
+// usa parcelaAtual como desempate, também decrescente — sem isso, a ordem
+// de exibição da visão "Todas" ficava dependendo da ordem "por acaso" com
+// que os registros foram lidos do IndexedDB (o sort é estável), o que podia
+// colocar a parcela mais antiga (8/12) antes da mais nova (9/12). Regra
+// GENÉRICA: nunca depende de qual loja/descrição é o parcelamento, só de
+// data e parcelaAtual — itens sem parcelaAtual (receitas, despesas não
+// parceladas) tratam o desempate como 0, sem efeito nenhum sobre eles.
+function compararPorDataDesc(a, b) {
+  const diff = new Date(b.data) - new Date(a.data);
+  if (diff !== 0) return diff;
+  return (b.parcelaAtual || 0) - (a.parcelaAtual || 0);
+}
+
 function itensUnificados() {
   const despesas = TODAS_DESPESAS.map((d) => ({ ...d, tipo: 'despesa' }));
   const receitas = TODAS_RECEITAS.map((r) => ({
@@ -129,7 +145,7 @@ function itensUnificados() {
     // competência financeira de uma receita = mês da própria data (regra 1C)
     mesCompetencia: r.data.slice(0, 7)
   }));
-  return [...despesas, ...receitas].sort((a, b) => new Date(b.data) - new Date(a.data));
+  return [...despesas, ...receitas].sort(compararPorDataDesc);
 }
 
 function aplicarFiltros() {
