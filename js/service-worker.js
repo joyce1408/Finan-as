@@ -16,7 +16,7 @@
 // (arquivos estáticos), nunca no IndexedDB (onde ficam os dados financeiros
 // reais) — ver o listener 'activate', que só chama caches.delete(), nunca
 // indexedDB.deleteDatabase().
-const CACHE_NAME = 'financas-app-v16';
+const CACHE_NAME = 'financas-app-v17';
 const ARQUIVOS_PARA_CACHE = [
   './index.html',
   './onboarding.html',
