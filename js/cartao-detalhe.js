@@ -43,7 +43,6 @@ async function iniciar() {
   document.getElementById('bankLogo').style.background = cor;
   document.getElementById('bankLogo').textContent = cartao.nome.slice(0, 2).toUpperCase();
   document.getElementById('bankName').textContent = cartao.nome;
-  document.getElementById('bankSub').textContent = `Fecha dia ${cartao.diaFechamento} · vence dia ${cartao.diaVencimento}`;
 
   // A fatura em destaque vem sempre do registro real (importado ou
   // reconstruído pela migração), nunca mais recalculada por data + dia de
@@ -53,6 +52,21 @@ async function iniciar() {
   const fatura = await DB.faturaEmDestaquePorCartao(id);
   faturaDestaqueAtualId = fatura ? fatura.id : null;
   const acaoFaturaPaga = document.getElementById('acaoFaturaPaga');
+
+  // Correção 1 da homologação: "Fecha dia X · vence dia Y" precisa vir do
+  // fechamento/vencimento REAIS já persistidos NESTA fatura específica —
+  // nunca do dia de fechamento/vencimento genérico do CARTÃO
+  // (cartao.diaFechamento/diaVencimento), que é só a sugestão usada em
+  // NOVAS importações e pode ter sido corrigida depois que esta fatura já
+  // existia, ficando dessincronizada do dado real dela. Só cai no dia do
+  // cartão quando ainda não existe nenhuma fatura pra mostrar.
+  if (fatura && fatura.fechamento) {
+    const fech = new Date(fatura.fechamento);
+    const venc = new Date(fatura.vencimento);
+    document.getElementById('bankSub').textContent = `Fecha dia ${fech.getDate()} · vence dia ${venc.getDate()}`;
+  } else {
+    document.getElementById('bankSub').textContent = `Fecha dia ${cartao.diaFechamento} · vence dia ${cartao.diaVencimento}`;
+  }
 
   if (!fatura) {
     document.getElementById('dueChip').textContent = '📅 Nenhuma fatura importada ainda';
@@ -73,9 +87,20 @@ async function iniciar() {
     // "Marcar como paga" / "Desmarcar como paga": altera SOMENTE o status
     // de pagamento da fatura (regra 14) — nunca despesas, valores, datas,
     // mesFatura ou faturaId. Funciona igual pra qualquer cartão/banco.
-    acaoFaturaPaga.innerHTML = fatura.statusPagamento === 'paga'
+    const botaoPagamento = fatura.statusPagamento === 'paga'
       ? `<button type="button" class="acao-fatura-paga-btn desmarcar" onclick="alternarFaturaPaga()">↩️ Desmarcar como paga</button>`
       : `<button type="button" class="acao-fatura-paga-btn" onclick="alternarFaturaPaga()">✅ Marcar como paga</button>`;
+
+    // Correção 1/4 da homologação: dá pra confirmar o fechamento/vencimento
+    // REAIS desta fatura (mesmo já paga) sem inventar nada — é a usuária
+    // quem informa o dado real, nunca uma inferência automática. Isso é o
+    // que faz "dados estimados, confira" (logo abaixo) parar de aparecer:
+    // esse aviso só depende de fatura.origem, e confirmar aqui promove a
+    // fatura pra origem 'importada' (mesma regra já usada quando uma
+    // importação real chega — regra 16).
+    const botaoCorrigirDatas = `<button type="button" class="acao-fatura-paga-btn corrigir" onclick="corrigirDatasFaturaAtual()">✏️ Corrigir fechamento/vencimento</button>`;
+
+    acaoFaturaPaga.innerHTML = botaoPagamento + botaoCorrigirDatas;
   }
 
   const valorFatura = fatura ? fatura.totalOficial : 0;
@@ -124,10 +149,25 @@ async function iniciar() {
         categoriaNome: mapaCategoria[d.categoriaId]?.nome || 'Outros',
         // regra 4: d.valor já é o valor da parcela, nunca dividir de novo
         valorParcela: d.valor,
-        etiquetaFatura
+        etiquetaFatura,
+        // Correção 2 da homologação: usada só pra ordenar (ver sort abaixo) —
+        // mesma função de competência de sempre, nunca uma lógica nova
+        mesCompetencia: DB.competenciaDespesa(d, mapaFatura)
       };
     })
-    .sort((a, b) => new Date(b.data) - new Date(a.data));
+    // Correção 2: ordena por COMPETÊNCIA (não pela data real), com
+    // parcelaAtual como critério de desempate. Antes, ordenar só por
+    // "data" fazia uma parcela confirmada e a prevista seguinte, quando
+    // projetadas/registradas no mesmo dia (ex.: 8/12 real em 12/09 e 9/12
+    // prevista também projetada pro dia 12/09), ficarem "empatadas" e
+    // saírem fora de ordem cronológica de competência (ex.: 12,11,10,8,9
+    // em vez de 12,11,10,9,8). Nada disso muda parcelaAtual, parcelaTotal,
+    // valor, faturaId ou status — só a ordem de exibição.
+    .sort((a, b) => {
+      if (a.mesCompetencia !== b.mesCompetencia) return b.mesCompetencia > a.mesCompetencia ? 1 : -1;
+      if (a.parcelaAtual !== b.parcelaAtual) return (b.parcelaAtual || 0) - (a.parcelaAtual || 0);
+      return new Date(b.data) - new Date(a.data);
+    });
   const listaCompras = document.getElementById('listaCompras');
 
   if (compras.length === 0) {
@@ -161,6 +201,33 @@ async function alternarFaturaPaga() {
     await DB.marcarFaturaComoPaga(faturaDestaqueAtualId);
   }
 
+  await iniciar();
+}
+
+// Correção 1/4 da homologação: confirma o fechamento/vencimento REAIS da
+// fatura em destaque — a usuária digita, nada é inferido/estimado aqui.
+// Não toca em totalOficial, statusPagamento, despesas vinculadas, mesFatura
+// nem cartaoId; só fechamento, vencimento, e a promoção de origem pra
+// 'importada' (dado real confirmado sempre prevalece — regra 16).
+async function corrigirDatasFaturaAtual() {
+  if (!faturaDestaqueAtualId) return;
+  const fatura = await DB.obterPorId('fatura', faturaDestaqueAtualId);
+  if (!fatura) return;
+
+  const fechAtual = fatura.fechamento ? new Date(fatura.fechamento).toISOString().slice(0, 10) : '';
+  const vencAtual = fatura.vencimento ? new Date(fatura.vencimento).toISOString().slice(0, 10) : '';
+
+  const fechamentoTexto = prompt('Data REAL de fechamento desta fatura (confira na fatura do banco) — AAAA-MM-DD ou DD/MM/AAAA:', fechAtual);
+  if (fechamentoTexto === null) return; // cancelou, nada foi gravado
+  const fechamentoISO = ImportarFatura.parseDataFatura(fechamentoTexto.trim());
+  if (!fechamentoISO) { alert('Data de fechamento inválida. Use AAAA-MM-DD ou DD/MM/AAAA.'); return; }
+
+  const vencimentoTexto = prompt('Data REAL de vencimento desta fatura — AAAA-MM-DD ou DD/MM/AAAA:', vencAtual);
+  if (vencimentoTexto === null) return;
+  const vencimentoISO = ImportarFatura.parseDataFatura(vencimentoTexto.trim());
+  if (!vencimentoISO) { alert('Data de vencimento inválida. Use AAAA-MM-DD ou DD/MM/AAAA.'); return; }
+
+  await DB.corrigirDatasFatura(faturaDestaqueAtualId, { fechamento: fechamentoISO, vencimento: vencimentoISO });
   await iniciar();
 }
 

@@ -954,6 +954,27 @@ async function desmarcarFaturaComoPaga(faturaId) {
   return atualizada;
 }
 
+// Correção 1/4 da homologação (revisão cirúrgica): confirma o
+// fechamento/vencimento REAIS de uma fatura que já existe — mesmo já paga.
+// Não é inferência nem estimativa: é o dado que a própria usuária confirma
+// depois de conferir na fatura do banco. Existe porque uma fatura 'migrada'
+// que já foi marcada como paga nunca mais é reprocessada pela migração
+// (migrarFaturasParaV5 só reprocessa migrada+não paga, de propósito, pra
+// nunca sobrescrever o pagamento) — então, se ela foi criada com uma
+// estimativa antiga (baseada no dia de fechamento/vencimento que o CARTÃO
+// tinha configurado NAQUELE momento) e essa configuração do cartão mudou
+// depois, a fatura fica congelada com o valor velho pra sempre, a menos que
+// alguém confirme o dado real aqui. Só mexe em fechamento/vencimento/
+// origem — nunca em totalOficial, statusPagamento, despesas vinculadas,
+// mesFatura ou cartaoId.
+async function corrigirDatasFatura(faturaId, { fechamento, vencimento }) {
+  const fatura = await obterPorId('fatura', faturaId);
+  if (!fatura) return null;
+  const atualizada = { ...fatura, fechamento, vencimento, origem: 'importada' };
+  await atualizar('fatura', atualizada);
+  return atualizada;
+}
+
 async function cartoesComResumo() {
   const cartoes = await listarTodos('cartao');
   const resultado = [];
@@ -1109,7 +1130,7 @@ const DB = {
   gastosDoMes, gastosPorCategoria, totalGastoNoMes, gastosDiariosDoMes, parcelasProximoMes,
   rendaAtual, receitasDoMes, totalReceitasAvulsasNoMes, entradasTotaisDoMes,
   cartoesComResumo, faturasPorCartao, despesasDaFatura, faturasClassificadas, faturaEmDestaquePorCartao,
-  marcarFaturaComoPaga, desmarcarFaturaComoPaga,
+  marcarFaturaComoPaga, desmarcarFaturaComoPaga, corrigirDatasFatura,
   mesAtualISO, mesAnteriorISO, somarMesISO, despesasDetalhadas, totalDespesasEntre, houveDespesaHoje,
   adicionarAporte, historicoAportes, despesasAVistaDoMes, saidasConfirmadasDoMes, saldoDisponivelDoMes,
   competenciaDespesa, removerDespesasDuplicadas, importarDadosCompletos,
