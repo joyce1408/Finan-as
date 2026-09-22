@@ -20,14 +20,23 @@ async function renderVisaoGeral() {
   const despesas = await DB.totalGastoNoMes();
   const saldo = receitas - despesas;
 
-  const despesasMesPassado = await DB.totalGastoNoMes(DB.mesAnteriorISO());
+  const mesPassadoISO = DB.mesAnteriorISO();
+  const despesasMesPassado = await DB.totalGastoNoMes(mesPassadoISO);
   let deltaTexto = '—';
   let deltaClasse = '';
   if (despesasMesPassado > 0) {
     const variacao = ((despesas - despesasMesPassado) / despesasMesPassado) * 100;
     deltaClasse = variacao <= 0 ? 'down' : 'up';
     const seta = variacao <= 0 ? '↓' : '↑';
-    deltaTexto = `${seta} ${Math.abs(variacao).toFixed(0)}% vs. mês passado`;
+    // Ajuste da revisão final (item 5): o cálculo continua exatamente o
+    // mesmo (despesas confirmadas do mês atual vs. mês anterior, via
+    // DB.totalGastoNoMes) — só o texto fica mais claro: cita o mês de
+    // comparação pelo nome (em vez de "mês passado" genérico) e deixa
+    // explícito que despesas é o total confirmado até agora, já que o mês
+    // atual pode ainda estar em andamento. Nada disso vira previsão nem
+    // inclui parcelas futuras.
+    const nomeMesPassado = new Date(`${mesPassadoISO}-02`).toLocaleDateString('pt-BR', { month: 'long' });
+    deltaTexto = `${seta} ${Math.abs(variacao).toFixed(0)}% vs. ${nomeMesPassado} · confirmados até agora`;
   }
 
   document.getElementById('ovReceitas').textContent = formatarMoeda(receitas);

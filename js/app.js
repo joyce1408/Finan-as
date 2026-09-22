@@ -155,12 +155,28 @@ async function renderHome() {
     .filter(c => c.tipo === 'estilo_de_vida')
     .reduce((s, c) => s + c.total, 0);
   const insight = Motor.avaliarPoupanca(renda, gastoEstiloVida);
+
+  // Ajuste da revisão final (item 4): quando ainda não existe NENHUMA
+  // despesa confirmada no mês (totalGasto vem de saidasConfirmadasDoMes,
+  // já calculado acima em DB.saldoDisponivelDoMes — regra 4/14), dizer que
+  // os gastos estão "sob controle" é uma conclusão precipitada: não há
+  // gasto nenhum ainda pra avaliar. Isso troca só o TEXTO exibido aqui —
+  // o cálculo do Motor (avaliarPoupanca, percentual, alerta) continua
+  // exatamente o mesmo e intocado, e só entra em jogo quando não há alerta.
+  const semGastoConfirmadoAinda = totalGasto === 0 && !insight.alerta;
+  const insightTitulo = semGastoConfirmadoAinda
+    ? 'Tudo certo por enquanto'
+    : (insight.alerta ? 'Oportunidade de economia' : 'Tudo em ordem');
+  const insightTexto = semGastoConfirmadoAinda
+    ? 'Ainda não há gastos confirmados registrados neste mês.'
+    : insight.texto;
+
   document.getElementById('insightBox').innerHTML = `
     <div class="insight-card ${insight.alerta ? 'alert' : 'save'}">
       <div class="insight-icon">${insight.alerta ? '⚠️' : '✅'}</div>
       <div>
-        <div class="insight-title">${insight.alerta ? 'Oportunidade de economia' : 'Tudo em ordem'}</div>
-        <div class="insight-text">${insight.texto}</div>
+        <div class="insight-title">${insightTitulo}</div>
+        <div class="insight-text">${insightTexto}</div>
       </div>
     </div>
   `;
