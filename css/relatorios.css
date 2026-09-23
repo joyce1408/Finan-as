@@ -3,6 +3,14 @@
 .page-title { font-size: 22px; font-weight: 700; margin-top: 8px; margin-bottom: 4px; }
 .page-sub { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 18px; }
 
+/* Navegação do mês de referência (diagnóstico de 23/09) — controla Visão
+   geral, Evolução dos gastos, Gastos por categoria e Insights, todos a
+   partir da mesma referência (ver mesReferenciaISO em js/relatorios.js) */
+.periodo-nav { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 18px; }
+.periodo-nav-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); color: var(--ink); font-size: 18px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.periodo-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.periodo-nav-label { font-size: 14px; font-weight: 700; min-width: 130px; text-align: center; }
+
 .pills { display: flex; gap: 8px; margin-bottom: 18px; overflow-x: auto; }
 .pill { flex-shrink: 0; padding: 8px 14px; border-radius: 20px; background: var(--card); border: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--ink-soft); }
 .pill.active { background: var(--blue); border-color: var(--blue); color: #fff; }
