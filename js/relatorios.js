@@ -15,28 +15,77 @@ function statusParaSemaforo(status) {
   return status === 'ok' ? 'green' : status === 'warn' ? 'amber' : 'red';
 }
 
+// ---------- Período de referência dos Relatórios (diagnóstico de 23/09) ----------
+// Antes, "Gastos por categoria" (e os outros gráficos que dependem de mês)
+// calculavam sempre em cima de DB.mesAtualISO() — o mês corrente de verdade,
+// travado em new Date() — sem nenhuma forma de olhar outro mês. Resultado:
+// no dia 23/09, com o gasto real registrado em agosto/2026 (competência das
+// faturas), a tela sempre mostrava setembro/2026 (quase vazio). Em vez de
+// criar um seletor por gráfico, existe UMA referência de mês só
+// (mesReferenciaISO), navegável pelos botões ‹ › no topo da tela, e
+// compartilhada por todos os componentes que dependem de período: Visão
+// geral, Evolução dos gastos, Gastos por categoria e os Insights (que usam
+// os mesmos totais de categoria). O valor em si continua vindo sempre de
+// competenciaDespesa()/DB.gastosPorCategoria() para o mês pedido — essa
+// regra não é duplicada nem alterada aqui, só passa a receber um mês
+// diferente do padrão quando a usuária navega. Histórico mensal (visão fixa
+// dos últimos 6 meses reais), Comprometimento do cartão (parcelas do
+// PRÓXIMO mês real) e Evolução da reserva (histórico de aportes desde
+// sempre) não são "o mês que estou analisando" — continuam como estavam.
+let mesReferenciaISO = DB.mesAtualISO();
+
+function rotuloMesReferencia() {
+  return rotuloMes(mesReferenciaISO);
+}
+
+function renderNavPeriodo() {
+  const label = document.getElementById('periodoNavLabel');
+  if (label) label.textContent = rotuloMesReferencia();
+  const btnProximo = document.getElementById('periodoNavProximo');
+  if (btnProximo) btnProximo.disabled = mesReferenciaISO >= DB.mesAtualISO();
+}
+
+async function renderComponentesDoPeriodo() {
+  renderNavPeriodo();
+  await Promise.all([renderVisaoGeral(), renderGrafico(), renderCategorias(), renderInsights()]);
+}
+
+async function mudarMesReferencia(delta) {
+  const alvo = DB.somarMesISO(mesReferenciaISO, delta);
+  if (alvo >= DB.mesAtualISO() && delta > 0) return; // não navega pra mês futuro sem dado real
+  mesReferenciaISO = alvo;
+  grupoSelecionado = null; // fecha o drill-down aberto — ele pertencia ao mês anterior
+  const painel = document.getElementById('drillPanel');
+  if (painel) painel.innerHTML = '';
+  document.querySelectorAll('.bar-col').forEach((el) => el.classList.remove('selecionada'));
+  await renderComponentesDoPeriodo();
+}
+
 async function renderVisaoGeral() {
-  const receitas = await DB.entradasTotaisDoMes();
-  const despesas = await DB.totalGastoNoMes();
+  const receitas = await DB.entradasTotaisDoMes(mesReferenciaISO);
+  const despesas = await DB.totalGastoNoMes(mesReferenciaISO);
   const saldo = receitas - despesas;
 
-  const mesPassadoISO = DB.mesAnteriorISO();
-  const despesasMesPassado = await DB.totalGastoNoMes(mesPassadoISO);
+  const mesAnteriorAoReferencia = DB.somarMesISO(mesReferenciaISO, -1);
+  const despesasMesPassado = await DB.totalGastoNoMes(mesAnteriorAoReferencia);
   let deltaTexto = '—';
   let deltaClasse = '';
   if (despesasMesPassado > 0) {
     const variacao = ((despesas - despesasMesPassado) / despesasMesPassado) * 100;
     deltaClasse = variacao <= 0 ? 'down' : 'up';
     const seta = variacao <= 0 ? '↓' : '↑';
-    // Ajuste da revisão final (item 5): o cálculo continua exatamente o
-    // mesmo (despesas confirmadas do mês atual vs. mês anterior, via
-    // DB.totalGastoNoMes) — só o texto fica mais claro: cita o mês de
-    // comparação pelo nome (em vez de "mês passado" genérico) e deixa
-    // explícito que despesas é o total confirmado até agora, já que o mês
-    // atual pode ainda estar em andamento. Nada disso vira previsão nem
-    // inclui parcelas futuras.
-    const nomeMesPassado = new Date(`${mesPassadoISO}-02`).toLocaleDateString('pt-BR', { month: 'long' });
-    deltaTexto = `${seta} ${Math.abs(variacao).toFixed(0)}% vs. ${nomeMesPassado} · confirmados até agora`;
+    // Ajuste da revisão final (item 5, mantido) + correção de período: o
+    // cálculo continua o mesmo (despesas confirmadas do mês analisado vs. o
+    // mês imediatamente anterior a ele, via DB.totalGastoNoMes) — o texto
+    // cita o mês de comparação pelo nome. "confirmados até agora" só é
+    // exibido quando o mês analisado É o mês corrente de verdade (que pode
+    // ainda estar em andamento); ao navegar pra um mês passado já encerrado,
+    // esse texto some, porque não faria sentido falar em "até agora" de um
+    // mês que já terminou. Nada disso vira previsão nem inclui parcelas
+    // futuras.
+    const nomeMesPassado = new Date(`${mesAnteriorAoReferencia}-02`).toLocaleDateString('pt-BR', { month: 'long' });
+    const ehMesCorrenteReal = mesReferenciaISO === DB.mesAtualISO();
+    deltaTexto = `${seta} ${Math.abs(variacao).toFixed(0)}% vs. ${nomeMesPassado}${ehMesCorrenteReal ? ' · confirmados até agora' : ''}`;
   }
 
   document.getElementById('ovReceitas').textContent = formatarMoeda(receitas);
@@ -61,7 +110,7 @@ function buildPath(points, w, h, padTop) {
 }
 
 async function renderGrafico() {
-  const gastosDiarios = await DB.gastosDiariosDoMes();
+  const gastosDiarios = await DB.gastosDiariosDoMes(mesReferenciaISO);
   const { line, area } = buildPath(gastosDiarios, 320, 80, 12);
   document.getElementById('linePath').setAttribute('d', line);
   document.getElementById('areaPath').setAttribute('d', area);
@@ -127,7 +176,7 @@ const LIMITES_PADRAO = { 'Essenciais': 1500, 'Alimentação': 500, 'Transporte':
 let grupoSelecionado = null;
 
 async function renderCategorias() {
-  const categorias = await DB.gastosPorCategoria();
+  const categorias = await DB.gastosPorCategoria(mesReferenciaISO);
 
   const grupos = ORDEM_GRUPOS.map((nomeGrupo) => {
     let total = 0;
@@ -222,8 +271,8 @@ function renderDrillPanel(grupo, idx) {
 }
 
 async function renderInsights() {
-  const renda = await DB.entradasTotaisDoMes();
-  const categorias = await DB.gastosPorCategoria();
+  const renda = await DB.entradasTotaisDoMes(mesReferenciaISO);
+  const categorias = await DB.gastosPorCategoria(mesReferenciaISO);
   const gastoEstiloVida = categorias.filter((c) => c.tipo === 'estilo_de_vida').reduce((s, c) => s + c.total, 0);
 
   const poupanca = Motor.avaliarPoupanca(renda, gastoEstiloVida);
@@ -297,6 +346,7 @@ async function renderEvolucaoReserva() {
 (async function iniciar() {
   await DB.abrirBanco();
   await DB.seedInicial();
+  renderNavPeriodo();
   await Promise.all([
     renderVisaoGeral(),
     renderGrafico(),

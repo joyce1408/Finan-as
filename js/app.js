@@ -126,13 +126,18 @@ async function renderHome() {
     billsList.innerHTML = `<div style="text-align:center;padding:20px 0;color:var(--ink-soft);font-size:13px">Nenhuma fatura importada ainda.</div>`;
   }
 
-  // Mostra até 3 faturas: prioriza as pendentes de pagamento (mais urgente
-  // primeiro); se não houver pendências suficientes pra preencher a lista,
-  // completa com as pagas mais recentes — uma fatura paga nunca desaparece,
-  // só perde prioridade de destaque pra quem ainda precisa ser paga.
+  // Ordem de prioridade: pendentes de pagamento primeiro (mais urgente
+  // primeiro, já vem assim de faturasClassificadas), pagas mais recentes
+  // depois. Correção do diagnóstico de 23/09: antes a lista era cortada em
+  // até 3 faturas (.slice(0, 3)), escondendo em silêncio qualquer fatura
+  // além dessa contagem. Agora TODAS as faturas aparecem — nenhuma é
+  // escondida — e quem mantém a tela compacta com muitos cartões é o CSS
+  // (.bills-list vira uma faixa rolável por toque no celular, e quebra em
+  // colunas no desktop; ver css/style.css). Nenhum dado, status ou valor
+  // muda aqui — só a quantidade de cards renderizados.
   const naoPagas = todasFaturas.filter((f) => f.situacao !== 'quitada');
   const pagas = todasFaturas.filter((f) => f.situacao === 'quitada').sort((a, b) => b.vencimento - a.vencimento);
-  const faturasParaMostrar = [...naoPagas, ...pagas].slice(0, 3);
+  const faturasParaMostrar = [...naoPagas, ...pagas];
 
   for (const f of faturasParaMostrar) {
     const tag = tagFaturaHome(f);

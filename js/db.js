@@ -755,10 +755,31 @@ async function despesasDetalhadas() {
 // FINANCEIRA (não a data real) cai no mês calendário pedido, somando todos
 // os cartões + à vista. Despesa de cartão usa fatura.mesFatura; dinheiro/pix
 // usa a data real. Previstos nunca entram.
+//
+// Categoria órfã (correção do diagnóstico de 23/09): antes, uma despesa cujo
+// categoriaId não batia com nenhuma categoria existente (ex.: categoria
+// excluída por fora do fluxo normal de exclusão, ou dado antigo) era
+// descartada em silêncio daqui — ela nunca aparecia nas barras nem entrava
+// no total, mesmo sendo uma despesa confirmada real. Isso divergia de
+// saidasConfirmadasDoMes() (usado pelo "Saídas" da Home), que soma TODAS as
+// despesas confirmadas do mês sem checar categoria. Agora essa despesa é
+// reatribuída para a categoria "Outros" (mesmo destino já usado por
+// excluirCategoria() em categorias.js quando uma categoria é apagada pela
+// tela de gerenciamento) — nunca é descartada, e nenhuma categoria "Outros"
+// nova é criada: reaproveita a que já existe, buscando por nome. Só no caso
+// extremo de nem "Outros" existir mais (banco sem seed nenhum) é que uma
+// entrada temporária, só em memória, é usada — nada é gravado no IndexedDB
+// por isso.
 async function gastosPorCategoria(mesISO = mesAtualISO()) {
   const categorias = await listarTodos('categoria');
   const mapa = {};
   categorias.forEach((c) => { mapa[c.id] = { ...c, total: 0, itens: [] }; });
+
+  const outros = categorias.find((c) => c.nome === 'Outros');
+  const idFallback = outros ? outros.id : 'outros_fallback_memoria';
+  if (!mapa[idFallback]) {
+    mapa[idFallback] = { id: null, nome: 'Outros', icone: '💬', tipo: 'estilo_de_vida', total: 0, itens: [] };
+  }
 
   const [todasDespesas, mapaFatura] = await Promise.all([listarTodos('despesa'), mapaFaturasPorId()]);
   const relevantes = todasDespesas.filter((d) =>
@@ -766,10 +787,9 @@ async function gastosPorCategoria(mesISO = mesAtualISO()) {
   );
 
   relevantes.forEach((d) => {
-    if (mapa[d.categoriaId]) {
-      mapa[d.categoriaId].total += d.valor;
-      mapa[d.categoriaId].itens.push({ ...d, valorParcela: d.valor });
-    }
+    const destino = mapa[d.categoriaId] ? d.categoriaId : idFallback;
+    mapa[destino].total += d.valor;
+    mapa[destino].itens.push({ ...d, valorParcela: d.valor });
   });
 
   return Object.values(mapa).sort((a, b) => b.total - a.total);
