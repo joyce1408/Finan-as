@@ -119,9 +119,13 @@ html, body {
    js/app.js) — todas as faturas aparecem — e é este CSS que mantém a tela
    compacta: no celular vira uma faixa horizontal rolável por toque (cada
    card com largura fixa, uma "prateleira" de cartões), sem crescer a tela
-   pra baixo por mais faturas que existam; a partir de --bp-tablet a lista
-   passa a quebrar em várias colunas, aproveitando a largura maior do
-   desktop em vez de rolar. */
+   pra baixo por mais faturas que existam. Correção de 23/09: o breakpoint
+   abaixo (900px) tem que ser o MESMO em que --app-width aumenta — antes
+   era 720px, então entre 720-899px a lista virava flex-wrap sem o app
+   ainda ter largura extra pra oferecer, e cada card acabava sozinho numa
+   linha (nenhum ganho de compactação nessa faixa). Só a partir de 900px,
+   quando o app realmente fica mais largo, é que a lista quebra em várias
+   colunas em vez de rolar. */
 .bills-list {
   display: flex;
   flex-direction: row;
@@ -136,7 +140,7 @@ html, body {
 }
 .bill-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; flex: 0 0 250px; scroll-snap-align: start; }
 
-@media (min-width: 720px) {
+@media (min-width: 900px) {
   .bills-list { flex-wrap: wrap; overflow-x: visible; margin: 0; padding-left: 0; padding-right: 0; }
   .bill-card { flex: 1 1 240px; }
 }
