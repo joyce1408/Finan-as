@@ -21,6 +21,12 @@
     <div class="page-title">Relatórios</div>
     <div class="page-sub">Veja como está sua vida financeira</div>
 
+    <div class="periodo-nav">
+      <button class="periodo-nav-btn" id="periodoNavAnterior" onclick="mudarMesReferencia(-1)" aria-label="Mês anterior">‹</button>
+      <div class="periodo-nav-label" id="periodoNavLabel">—</div>
+      <button class="periodo-nav-btn" id="periodoNavProximo" onclick="mudarMesReferencia(1)" aria-label="Próximo mês">›</button>
+    </div>
+
     <div class="overview-card">
       <div class="overview-title">Visão geral do mês</div>
       <div class="overview-grid">
