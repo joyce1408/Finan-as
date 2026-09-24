@@ -29,6 +29,7 @@
 
 .section-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 12px; }
 .section-head-title { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; }
+.section-head-periodo { font-size: 12px; font-weight: 600; color: var(--ink-soft); }
 
 .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 16px 14px 12px; margin-bottom: 18px; position: relative; }
 .chart-card svg { width: 100%; display: block; overflow: visible; }
@@ -79,96 +80,17 @@
 .commit-fill { height: 100%; border-radius: 8px; }
 .commit-note { font-size: 11.5px; color: var(--ink-soft); }
 
-/* ---------- Gráfico de colunas de categorias ---------- */
+/* ---------- Gastos por categoria: lista ordenada + destaque só pra quem
+   tem gasto (correção de 24/09). .cat-list/.cat-row/.drill* já existiam
+   neste arquivo (não eram usadas por nenhum render ainda) — só passaram a
+   ser preenchidas por js/relatorios.js. As antigas .bar-chart-*/.bar-col*/
+   .drill-panel-* (gráfico de 5 colunas fixas) saíram por não terem mais
+   nenhum elemento que as use. ---------- */
 
-@keyframes pulseOpacidade {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.bar-chart-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 20px 14px 14px;
-  margin-bottom: 10px;
-}
-
-.bar-chart-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  height: 150px;
-  gap: 8px;
-}
-
-.bar-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100%;
-  cursor: pointer;
-}
-
-.bar-col-value {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--ink);
-  margin-bottom: 6px;
-  white-space: nowrap;
-}
-
-.bar-col-track {
-  flex: 1;
-  width: 100%;
-  max-width: 34px;
-  display: flex;
-  align-items: flex-end;
-  background: var(--border);
-  border-radius: 8px 8px 4px 4px;
-  overflow: hidden;
-}
-
-.bar-col-fill {
-  width: 100%;
-  border-radius: 8px 8px 4px 4px;
-  transition: height 0.3s ease;
-}
-
-.bar-col-fill.alerta {
-  background: var(--red) !important;
-  animation: pulseOpacidade 1.8s ease-in-out infinite;
-}
-
-.bar-col-icon {
-  font-size: 18px;
-  margin-top: 8px;
-}
-
-.bar-col.selecionada .bar-col-track {
-  box-shadow: 0 0 0 2px var(--blue);
-}
-
-.drill-panel-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  overflow: hidden;
-  max-height: 0;
-  transition: max-height 0.35s ease;
-  margin-bottom: 18px;
-}
-
-.drill-panel-card.open { max-height: 500px; overflow-y: auto; }
-
-.drill-panel-inner { padding: 16px; }
-.drill-panel-title { font-size: 13.5px; font-weight: 700; margin-bottom: 10px; }
-.drill-panel-item { display: flex; justify-content: space-between; font-size: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
-.drill-panel-item:first-child { border-top: none; padding-top: 0; }
-.drill-panel-name { font-weight: 500; }
-.drill-panel-date { color: var(--ink-soft); font-size: 10.5px; margin-top: 1px; }
-.drill-panel-value { font-weight: 600; }
+.cat-sem-gasto { margin-bottom: 18px; }
+.cat-sem-gasto-titulo { font-size: 11px; color: var(--ink-soft); margin-bottom: 8px; }
+.cat-sem-gasto-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cat-sem-gasto-chip { font-size: 11.5px; color: var(--ink-soft); background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 5px 10px; }
 
 .glossario-card {
   background: var(--card);
