@@ -54,10 +54,7 @@ async function mudarMesReferencia(delta) {
   const alvo = DB.somarMesISO(mesReferenciaISO, delta);
   if (alvo >= DB.mesAtualISO() && delta > 0) return; // não navega pra mês futuro sem dado real
   mesReferenciaISO = alvo;
-  grupoSelecionado = null; // fecha o drill-down aberto — ele pertencia ao mês anterior
-  const painel = document.getElementById('drillPanel');
-  if (painel) painel.innerHTML = '';
-  document.querySelectorAll('.bar-col').forEach((el) => el.classList.remove('selecionada'));
+  categoriaAbertaId = null; // fecha qualquer categoria expandida — ela pertencia ao mês anterior
   await renderComponentesDoPeriodo();
 }
 
@@ -156,118 +153,131 @@ async function renderHistoricoMensal() {
   }).join('');
 }
 
-// Ícones e cores por grupo do gráfico (5 colunas fixas). Categorias novas
-// criadas em "Gerenciar Categorias" entram automaticamente na coluna que a
-// usuária escolher — nada aqui precisa mudar quando ela cria uma categoria.
-const INFO_GRUPO = {
-  'Essenciais': { icone: '🏠', cor: '#2F5FE0' },
-  'Alimentação': { icone: '🍴', cor: '#8A5FD1' },
-  'Transporte': { icone: '🚗', cor: '#C7902E' },
-  'Lazer': { icone: '🍿', cor: '#E0669B' },
-  'Outros': { icone: '💬', cor: '#6B7280' }
-};
-const ORDEM_GRUPOS = ['Essenciais', 'Alimentação', 'Transporte', 'Lazer', 'Outros'];
-
-// Fallback só para categorias antigas que ainda não têm o campo grupoGrafico
-// salvo (bancos de dados criados antes desse recurso existir)
-const FALLBACK_GRUPO_POR_NOME = { 'Essenciais': 'Essenciais', 'Alimentação': 'Alimentação', 'Transporte': 'Transporte', 'Delivery': 'Lazer', 'Assinaturas': 'Lazer', 'Lazer': 'Lazer', 'Outros': 'Outros' };
-const LIMITES_PADRAO = { 'Essenciais': 1500, 'Alimentação': 500, 'Transporte': 400, 'Delivery': 200, 'Assinaturas': 150, 'Lazer': 150, 'Outros': 300 };
-
-let grupoSelecionado = null;
+// ---------- Gastos por categoria (correção de 24/09) ----------
+// Antes, esta seção agrupava as despesas em 5 "grupos" fixos (Essenciais,
+// Alimentação, Transporte, Lazer, Outros — sempre nessa ordem, sempre as 5
+// colunas, mesmo zeradas) e o "percentual" mostrado era percentualDoLimite
+// (gasto ÷ orçamento da categoria), não o percentual do total do mês. Isso
+// não respondia "em quais categorias estou gastando mais" — não tinha
+// ordenação por valor, dava o mesmo destaque a quem gastou R$0 e a quem
+// concentrava o gasto todo, e o percentual não somava ~100%.
+//
+// Agora a lista usa diretamente o retorno de DB.gastosPorCategoria() (a
+// mesma regra de sempre: só confirmado, competência via competenciaDespesa),
+// ordenado por total decrescente. O percentual mostrado é
+// categoria.total / totalConfirmadoDoMes * 100 — nunca percentualDoLimite,
+// que não é mais usado aqui. Categorias com total 0 vão pra uma área
+// secundária (chips), sem o mesmo destaque das que têm gasto. Nada disso
+// redistribui despesa nenhuma: cada categoria mostra exatamente o que já
+// está no IndexedDB (ver regra 7 do diagnóstico — as despesas do backup
+// que vieram como "Outros" continuam em "Outros").
+let categoriaAbertaId = null;
 
 async function renderCategorias() {
   const categorias = await DB.gastosPorCategoria(mesReferenciaISO);
+  const totalConfirmadoDoMes = categorias.reduce((soma, c) => soma + c.total, 0);
 
-  const grupos = ORDEM_GRUPOS.map((nomeGrupo) => {
-    let total = 0;
-    let limite = 0;
-    let itens = [];
+  // despesasDetalhadas() já calcula mesCompetencia = competenciaDespesa(d,
+  // mapaFatura) pra cada despesa (fatura.mesFatura quando há faturaId) — só
+  // reaproveita aqui pro drill-down, não recalcula a regra de novo.
+  const detalhadas = await DB.despesasDetalhadas();
 
-    categorias.forEach((c) => {
-      const grupoDaCategoria = c.grupoGrafico || FALLBACK_GRUPO_POR_NOME[c.nome] || 'Outros';
-      if (grupoDaCategoria === nomeGrupo) {
-        total += c.total;
-        limite += (c.limiteMensal || LIMITES_PADRAO[c.nome] || 300);
-        itens = itens.concat(c.itens.map((i) => ({ ...i, subcategoria: c.nome })));
-      }
-    });
+  window._categoriasDoMesRelatorio = categorias;
+  window._totalConfirmadoDoMesRelatorio = totalConfirmadoDoMes;
+  window._mapaDetalheDespesaRelatorio = Object.fromEntries(detalhadas.map((d) => [d.id, d]));
 
-    const percentualDoLimite = limite > 0 ? (total / limite) * 100 : 0;
-    return { nome: nomeGrupo, ...INFO_GRUPO[nomeGrupo], total, limite, percentualDoLimite, itens, emAlerta: percentualDoLimite >= 80 };
-  });
+  const labelPeriodo = document.getElementById('categoriasPeriodoLabel');
+  if (labelPeriodo) labelPeriodo.textContent = `— ${rotuloMes(mesReferenciaISO)}`;
 
-  const maiorPercentual = Math.max(...grupos.map((g) => g.percentualDoLimite), 100);
-  const row = document.getElementById('barChartRow');
-
-  row.innerHTML = grupos.map((g, i) => {
-    const alturaPct = Math.max((g.percentualDoLimite / maiorPercentual) * 100, g.total > 0 ? 6 : 2);
-    return `
-      <div class="bar-col" data-idx="${i}" onclick="toggleDrillGrupo(${i})">
-        <div class="bar-col-value">${formatarMoeda(g.total)}</div>
-        <div class="bar-col-track">
-          <div class="bar-col-fill ${g.emAlerta ? 'alerta' : ''}" style="height:${alturaPct.toFixed(0)}%; background:${g.cor}"></div>
-        </div>
-        <div class="bar-col-icon">${g.icone}</div>
-      </div>
-    `;
-  }).join('');
-
-  window._gruposGrafico = grupos;
-  if (grupoSelecionado !== null) renderDrillPanel(grupos[grupoSelecionado], grupoSelecionado);
+  desenharListaCategorias();
 }
 
-function toggleDrillGrupo(idx) {
-  const grupos = window._gruposGrafico;
-  if (grupoSelecionado === idx) {
-    grupoSelecionado = null;
-    document.getElementById('drillPanel').innerHTML = '';
-    document.querySelectorAll('.bar-col').forEach((el) => el.classList.remove('selecionada'));
-    return;
-  }
-  grupoSelecionado = idx;
-  document.querySelectorAll('.bar-col').forEach((el, i) => el.classList.toggle('selecionada', i === idx));
-  renderDrillPanel(grupos[idx], idx);
-}
+// Redesenha a lista a partir do que já foi buscado em renderCategorias()
+// (window._categoriasDoMesRelatorio) — chamada tanto pelo render inicial
+// quanto por toggleDrillCategoria(), sem precisar buscar no banco de novo
+// só pra abrir/fechar um item.
+function desenharListaCategorias() {
+  const categorias = window._categoriasDoMesRelatorio || [];
+  const totalConfirmadoDoMes = window._totalConfirmadoDoMesRelatorio || 0;
 
-function renderDrillPanel(grupo, idx) {
-  const painel = document.getElementById('drillPanel');
+  const comGasto = categorias.filter((c) => c.total > 0).sort((a, b) => b.total - a.total);
+  const semGasto = categorias.filter((c) => c.total === 0);
 
-  // Sub-totais por categoria real dentro do grupo (ex.: Lazer, Delivery, Assinaturas)
-  const subtotais = {};
-  grupo.itens.forEach((item) => {
-    subtotais[item.subcategoria] = (subtotais[item.subcategoria] || 0) + item.valorParcela;
-  });
+  const lista = document.getElementById('barChartRow');
+  lista.innerHTML = comGasto.length === 0
+    ? `<div style="text-align:center;padding:16px 0;color:var(--ink-soft);font-size:12.5px">Nenhum gasto confirmado em ${rotuloMes(mesReferenciaISO)}.</div>`
+    : comGasto.map((c, i) => desenharLinhaCategoria(c, i, totalConfirmadoDoMes)).join('');
 
-  const linhasSubtotal = Object.entries(subtotais).length > 1
-    ? Object.entries(subtotais).map(([nome, valor]) => `
-        <div class="drill-panel-item">
-          <div class="drill-panel-name">${nome}</div>
-          <div class="drill-panel-value">${formatarMoeda(valor)}</div>
-        </div>
-      `).join('')
-    : '';
-
-  const linhasCompras = grupo.itens
-    .sort((a, b) => new Date(b.data) - new Date(a.data))
-    .map((item) => `
-      <div class="drill-panel-item">
-        <div>
-          <div class="drill-panel-name">${item.descricao || item.subcategoria}</div>
-          <div class="drill-panel-date">${item.subcategoria} · ${new Date(item.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</div>
-        </div>
-        <div class="drill-panel-value">${formatarMoeda(item.valorParcela)}</div>
-      </div>
-    `).join('');
-
-  painel.innerHTML = `
-    <div class="drill-panel-card open">
-      <div class="drill-panel-inner">
-        <div class="drill-panel-title">${grupo.icone} ${grupo.nome} — ${formatarMoeda(grupo.total)} de ${formatarMoeda(grupo.limite)} (${grupo.percentualDoLimite.toFixed(0)}%)</div>
-        ${linhasSubtotal}
-        ${grupo.itens.length === 0 ? '<div style="font-size:12px;color:var(--ink-soft)">Nenhum gasto registrado aqui este mês.</div>' : linhasCompras}
+  const areaSemGasto = document.getElementById('categoriasSemGasto');
+  areaSemGasto.innerHTML = semGasto.length === 0 ? '' : `
+    <div class="cat-sem-gasto">
+      <div class="cat-sem-gasto-titulo">Sem gasto em ${rotuloMes(mesReferenciaISO)}</div>
+      <div class="cat-sem-gasto-chips">
+        ${semGasto.map((c) => `<span class="cat-sem-gasto-chip">${c.icone || '💬'} ${c.nome}</span>`).join('')}
       </div>
     </div>
   `;
+}
+
+function desenharLinhaCategoria(categoria, indice, totalConfirmadoDoMes) {
+  // percentual = valor da categoria ÷ total de gastos confirmados do
+  // período × 100 (nunca percentualDoLimite)
+  const percentual = totalConfirmadoDoMes > 0 ? (categoria.total / totalConfirmadoDoMes) * 100 : 0;
+  const cor = CORES_CATEGORIA[indice % CORES_CATEGORIA.length];
+  const idLinha = categoria.id ?? 'orfa';
+  const aberta = categoriaAbertaId !== null && String(categoriaAbertaId) === String(idLinha);
+
+  return `
+    <div class="cat-row ${aberta ? 'open' : ''}">
+      <div class="cat-row-head" onclick="toggleDrillCategoria('${idLinha}')">
+        <div class="cat-icon">${categoria.icone || '💬'}</div>
+        <div class="cat-info">
+          <div class="cat-name">${categoria.nome}</div>
+          <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${percentual.toFixed(0)}%; background:${cor}"></div></div>
+        </div>
+        <div class="cat-amount">
+          <div class="cat-amount-value">${formatarMoeda(categoria.total)}</div>
+          <div class="cat-amount-pct">${percentual.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</div>
+        </div>
+        <div class="chevron">▾</div>
+      </div>
+      <div class="drill"><div class="drill-inner">${montarDrillItensCategoria(categoria)}</div></div>
+    </div>
+  `;
+}
+
+// Detalhamento (regra 6): descrição, valor e data já vinham do drill-down
+// anterior — acrescenta parcela (só quando parcelaTotal > 1) e competência
+// da fatura (só quando faturaId existir, usando mesCompetencia já calculado
+// por competenciaDespesa/despesasDetalhadas — nunca a data real da compra).
+function montarDrillItensCategoria(categoria) {
+  const mapaDetalhe = window._mapaDetalheDespesaRelatorio || {};
+  if (categoria.itens.length === 0) {
+    return '<div style="font-size:12px;color:var(--ink-soft)">Nenhuma despesa registrada aqui.</div>';
+  }
+  return categoria.itens
+    .slice()
+    .sort((a, b) => new Date(b.data) - new Date(a.data))
+    .map((item) => {
+      const detalhe = mapaDetalhe[item.id];
+      const partes = [new Date(item.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })];
+      if (item.parcelaTotal > 1) partes.push(`Parcela ${item.parcelaAtual}/${item.parcelaTotal}`);
+      if (item.faturaId != null && detalhe) partes.push(`Competência ${rotuloMes(detalhe.mesCompetencia)} (fatura)`);
+      return `
+        <div class="drill-item">
+          <div>
+            <div class="drill-name">${item.descricao || categoria.nome}</div>
+            <div class="drill-date">${partes.join(' · ')}</div>
+          </div>
+          <div class="drill-value">${formatarMoeda(item.valorParcela)}</div>
+        </div>
+      `;
+    }).join('');
+}
+
+function toggleDrillCategoria(idLinha) {
+  categoriaAbertaId = (categoriaAbertaId !== null && String(categoriaAbertaId) === String(idLinha)) ? null : idLinha;
+  desenharListaCategorias();
 }
 
 async function renderInsights() {
