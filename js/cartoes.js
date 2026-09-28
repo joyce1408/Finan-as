@@ -11,9 +11,7 @@ function corParaCartao(nome) {
   return `hsl(${hue}, 55%, 40%)`;
 }
 
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+function formatarMoeda(valor) { return UI.moeda(valor); }
 
 async function renderCartoes() {
   const cartoes = await DB.cartoesComResumo();
@@ -26,7 +24,7 @@ async function renderCartoes() {
 
   lista.innerHTML = cartoes.map((c) => {
     const status = Motor.statusLimite(c.percentualUsado);
-    const iniciais = c.nome.slice(0, 2).toUpperCase();
+    const iniciais = UI.escapar(c.nome.slice(0, 2).toUpperCase());
     const cor = corParaCartao(c.nome);
     const emAviso = c.percentualUsado >= 80;
     return `
@@ -34,19 +32,19 @@ async function renderCartoes() {
         <div class="card-item-top" onclick="location.href='cartao-detalhe.html?id=${c.id}'" style="cursor:pointer">
           <div class="card-avatar" style="background:${cor}">${iniciais}</div>
           <div>
-            <div class="card-item-name">${c.nome}</div>
-            <div class="card-item-sub">Vence dia ${c.diaVencimento}</div>
+            <div class="card-item-name">${UI.escapar(c.nome)}</div>
+            <div class="card-item-sub">Fecha dia ${c.diaFechamento || '?'} · vence dia ${c.diaVencimento}</div>
           </div>
           <div class="card-item-value">
             <div class="card-item-value-num">${formatarMoeda(c.valorFatura)}</div>
-            <div class="card-item-value-label">fatura atual</div>
+            <div class="card-item-value-label">${c.fatura ? `fatura ${Datas.rotuloMes(c.fatura.mesFatura)}` : 'sem fatura'}</div>
           </div>
         </div>
         <div class="card-limit-track"><div class="card-limit-fill ${status}" style="width:${Math.min(c.percentualUsado, 100).toFixed(0)}%; background:var(--${status === 'ok' ? 'green' : status === 'warn' ? 'amber' : 'red'})"></div></div>
         <div class="card-limit-note">${c.percentualUsado.toFixed(0)}% do limite de ${formatarMoeda(c.limite)} usado${emAviso ? ' — evite novas compras parceladas' : ''}</div>
         <div class="card-item-actions">
           <button class="card-action-btn" onclick="abrirModalCartao(${c.id})">✏️ Editar</button>
-          <button class="card-action-btn danger" onclick="excluirCartaoDaLista(${c.id}, '${c.nome.replace(/'/g, "\\'")}')">🗑️ Excluir</button>
+          <button class="card-action-btn danger" onclick="excluirCartaoDaLista(${c.id})">🗑️ Excluir</button>
         </div>
       </div>
     `;
@@ -111,18 +109,14 @@ async function salvarCartao() {
   await renderCartoes();
 }
 
-async function excluirCartaoDaLista(id, nome) {
-  const ok = confirm(`Tem certeza que deseja excluir o cartão ${nome}? As despesas já registradas continuam no seu histórico, mas passam a aparecer como "Dinheiro/Pix" em vez do nome do banco.`);
+// Excluir = arquivar: o cartão sai da lista, mas faturas e compras ficam no
+// histórico, nos meses corretos (nada é apagado).
+async function excluirCartaoDaLista(id) {
+  const cartao = await DB.obterPorId('cartao', id);
+  if (!cartao) return;
+  const ok = confirm(`Excluir o cartão ${cartao.nome}? Ele sai da lista, mas as faturas e compras já registradas continuam no histórico, nos meses corretos.`);
   if (!ok) return;
-
-  const despesas = await DB.listarTodos('despesa');
-  for (const d of despesas) {
-    if (d.cartaoId === id) {
-      await DB.atualizar('despesa', { ...d, cartaoId: null });
-    }
-  }
-
-  await DB.remover('cartao', id);
+  await DB.arquivarCartao(id);
   await renderCartoes();
 }
 

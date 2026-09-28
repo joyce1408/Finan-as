@@ -1,23 +1,22 @@
 // mais.js — conecta a tela Mais aos dados reais e às ações de segurança
 
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+function formatarMoeda(valor) { return UI.moeda(valor); }
 
 async function renderMais() {
   const nome = localStorage.getItem('ffjoyce2026_nome_usuaria');
   if (nome) document.getElementById('profileNome').textContent = nome;
 
-  const cartoes = await DB.listarTodos('cartao');
-  const categorias = await DB.listarTodos('categoria');
-  const reservas = await DB.listarTodos('reserva');
+  const cartoes = await DB.listarCartoesAtivos();
+  const categorias = await DB.listarCategoriasAtivas();
   const renda = await DB.rendaAtual();
 
   document.getElementById('qtdCartoes').textContent = cartoes.length;
   document.getElementById('qtdCategorias').textContent = categorias.length;
 
-  const reserva = reservas[0] || { valorAtual: 0, meta: 15000 };
-  document.getElementById('metaReserva').textContent = `Meta: ${formatarMoeda(reserva.meta)}`;
+  const reserva = Analises.avaliarReserva(await DB.obterReserva());
+  document.getElementById('metaReserva').textContent = reserva.estado === 'meta_nao_definida'
+    ? 'Meta não definida'
+    : `Meta: ${formatarMoeda(reserva.meta)}${reserva.prazoMeses ? ` em ${reserva.prazoMeses} meses` : ''}`;
   document.getElementById('rendaFixa').textContent = formatarMoeda(renda);
 
   atualizarToggleFaceId();
@@ -64,26 +63,16 @@ function removerFotoPerfil() {
   alert('Foto removida.');
 }
 
-async function removerDuplicatas() {
-  const ok = confirm('Isso procura despesas idênticas (mesmo valor, data, descrição e cartão) e apaga as cópias repetidas, mantendo só uma de cada. Útil quando uma importação de fatura acaba rodando duas vezes. Continuar?');
-  if (!ok) return;
-
-  const quantidade = await DB.removerDespesasDuplicadas();
-  if (quantidade === 0) {
-    alert('Nenhuma duplicata encontrada — está tudo certo.');
-  } else {
-    alert(`${quantidade} despesa(s) duplicada(s) removida(s).`);
-  }
-  await renderMais();
-}
-
-async function limparDespesasExemplo() {
-  const ok = confirm('Isso vai apagar TODAS as despesas cadastradas (inclusive as de exemplo que vieram com o app), pra você começar a lançar as suas de verdade. Seus cartões, categorias e renda continuam como estão. Deseja continuar?');
-  if (!ok) return;
-
-  await DB.limparStore('despesa');
-  alert('Despesas removidas! O app está zerado, pronto pra você começar a cadastrar de verdade.');
-  await renderMais();
+// Só LISTA possíveis duplicatas para conferência. Não apaga nada: duas
+// compras iguais no mesmo dia podem ser legítimas.
+async function conferirDuplicatas() {
+  const grupos = await DB.listarPossiveisDuplicatas();
+  abrirModalRestauracao(grupos.length === 0 ? 'Nenhuma duplicata aparente' : 'Possíveis duplicatas');
+  document.getElementById('botaoConfirmarRestauracao').style.display = 'none';
+  document.getElementById('corpoRestauracao').textContent = grupos.length === 0
+    ? 'Não encontrei lançamentos repetidos (mesmo cartão, dia, valor, descrição e parcela).'
+    : ['Estes lançamentos são iguais em cartão, dia, valor, descrição e parcela. Se algum for cópia indevida, exclua pela tela de Transações. Nada foi apagado automaticamente.', '',
+      ...grupos.map((g) => `• ${Datas.formatarDia(g[0].data)} · ${g[0].descricao || 'sem descrição'} · ${formatarMoeda(g[0].valor)} × ${g.length} (ids ${g.map((d) => d.id).join(', ')})`)].join('\n');
 }
 
 let campoEmEdicaoValor = null; // 'renda' | 'reserva'
@@ -92,17 +81,15 @@ async function abrirModalValor(campo) {
   campoEmEdicaoValor = campo;
   aplicarMascaraMoeda(document.getElementById('inputModalValor'));
 
+  document.getElementById('blocoPrazoReserva').style.display = campo === 'reserva' ? 'block' : 'none';
   if (campo === 'reserva') {
-    const reservas = await DB.listarTodos('reserva');
-    const reserva = reservas[0] || { valorAtual: 0, meta: 0 };
+    const reserva = await DB.obterReserva();
     document.getElementById('tituloModalValor').textContent = 'Meta da reserva de emergência';
-    definirValorMascarado(document.getElementById('inputModalValor'), reserva.meta);
+    definirValorMascarado(document.getElementById('inputModalValor'), reserva.meta || 0);
+    document.getElementById('inputPrazoReserva').value = reserva.prazoMeses || '';
   } else {
-    const mesAtual = DB.mesAtualISO();
-    const rendas = await DB.listarTodos('renda');
-    const atual = rendas.find((r) => r.mesReferencia === mesAtual);
-    document.getElementById('tituloModalValor').textContent = 'Renda mensal fixa';
-    definirValorMascarado(document.getElementById('inputModalValor'), atual ? atual.valorMensal : 0);
+    document.getElementById('tituloModalValor').textContent = 'Renda mensal fixa (vale a partir deste mês)';
+    definirValorMascarado(document.getElementById('inputModalValor'), await DB.rendaAtual());
   }
 
   document.getElementById('sheetOverlayValor').classList.add('open');
@@ -123,21 +110,12 @@ async function salvarModalValor() {
   if (isNaN(valor) || valor < 0) { alert('Valor inválido.'); return; }
 
   if (campoEmEdicaoValor === 'reserva') {
-    const reservas = await DB.listarTodos('reserva');
-    if (reservas[0]) {
-      await DB.atualizar('reserva', { ...reservas[0], meta: valor });
-    } else {
-      await DB.adicionar('reserva', { valorAtual: 0, meta: valor });
-    }
+    const prazoTexto = document.getElementById('inputPrazoReserva').value.trim();
+    const prazo = prazoTexto ? parseInt(prazoTexto, 10) : null;
+    if (prazoTexto && (!prazo || prazo < 1)) { alert('Prazo inválido.'); return; }
+    await DB.definirMetaReserva(valor, prazo);
   } else {
-    const mesAtual = DB.mesAtualISO();
-    const rendas = await DB.listarTodos('renda');
-    const atual = rendas.find((r) => r.mesReferencia === mesAtual);
-    if (atual) {
-      await DB.atualizar('renda', { ...atual, valorMensal: valor });
-    } else {
-      await DB.adicionar('renda', { valorMensal: valor, mesReferencia: mesAtual });
-    }
+    await DB.definirRenda(valor, DB.mesAtualISO());
   }
 
   fecharModalValor();
@@ -148,15 +126,14 @@ async function exportarDados() {
   // 'fatura' faltava aqui desde a v5 do schema (Despesa → Fatura → Cartão) —
   // sem ela, o backup nunca incluía mesFatura/statusPagamento/origem, só as
   // despesas com o faturaId apontando pro nada depois de um restore.
-  const stores = ['categoria', 'cartao', 'despesa', 'renda', 'reserva', 'receita', 'fatura'];
-  const dump = {};
-  for (const s of stores) dump[s] = await DB.listarTodos(s);
+  // exporta TODAS as stores do banco (inclusive aporte, fatura e meta)
+  const dump = await DB.exportarBackup();
 
   const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `financas-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `financas-backup-${Datas.hojeISO()}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -206,7 +183,8 @@ async function processarRestauracao(dados, confirmarSubstituicao) {
     abrirModalRestauracao('Backup inválido — nada foi alterado');
     document.getElementById('corpoRestauracao').textContent =
       'O arquivo não passou na validação e NADA foi escrito no banco:\n\n' +
-      resultado.erros.map((e) => `• ${e}`).join('\n');
+      resultado.erros.map((e) => `• ${e}`).join('\n') +
+      (resultado.avisos && resultado.avisos.length ? '\n\nAvisos:\n' + resultado.avisos.map((e) => `• ${e}`).join('\n') : '');
     return;
   }
 
@@ -246,6 +224,7 @@ function montarRelatorioFinal(r) {
   const linhas = [
     'Restauração concluída.',
     '',
+    ...(r.avisos && r.avisos.length ? ['Avisos da validação:', ...r.avisos.map((e) => `  • ${e}`), ''] : []),
     'Registros restaurados por store (preservando os IDs originais do backup):',
     ...Object.entries(r.contagemRestaurada).map(([s, n]) => `  ${s}: ${n}`),
     '',
@@ -258,14 +237,14 @@ function montarRelatorioFinal(r) {
   ];
   for (const f of r.faturas) {
     linhas.push(`  fatura id ${f.id} · cartaoId ${f.cartaoId} · mesFatura ${f.mesFatura} · total R$ ${Number(f.totalOficial).toFixed(2)} · ${f.statusPagamento} · origem ${f.origem}`);
-    linhas.push(`    fechamento ${f.fechamento ? new Date(f.fechamento).toLocaleDateString('pt-BR') : '—'} · vencimento ${f.vencimento ? new Date(f.vencimento).toLocaleDateString('pt-BR') : '—'}`);
+    linhas.push(`    fechamento ${Datas.formatarDia(f.fechamento)} · vencimento ${Datas.formatarDia(f.vencimento)}`);
   }
   linhas.push('');
   linhas.push('Séries de parcelamento restauradas/migradas:');
   for (const serie of r.seriesDeParcelamento) {
     linhas.push(`  idParcelamento ${serie.idParcelamento}:`);
     for (const p of serie.parcelas) {
-      linhas.push(`    ${p.parcelaAtual}/${p.parcelaTotal} · R$ ${Number(p.valor).toFixed(2)} · ${p.data.slice(0, 10)} · ${p.statusDespesa} · faturaId ${p.faturaId ?? '—'}`);
+      linhas.push(`    ${p.parcelaAtual}/${p.parcelaTotal} · R$ ${Number(p.valor).toFixed(2)} · ${Datas.formatarDia(p.data)} · ${p.statusDespesa} · faturaId ${p.faturaId ?? '—'}`);
     }
   }
   linhas.push('');

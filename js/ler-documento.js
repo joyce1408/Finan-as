@@ -215,6 +215,14 @@ async function extrairTextoDoDocumento(arquivo, aoProgredir) {
 
   let canvases = [];
 
+  // As bibliotecas de PDF/OCR vêm de CDN: sem internet elas não carregam.
+  if (tipo === 'pdf' && typeof pdfjsLib === 'undefined') {
+    throw new Error('Não consegui carregar o leitor de PDF (sem internet?). Tente de novo com internet ou importe em CSV.');
+  }
+  if (typeof Tesseract === 'undefined') {
+    throw new Error('Não consegui carregar o leitor de imagens (sem internet?). Tente de novo com internet ou importe em CSV.');
+  }
+
   if (tipo === 'pdf') {
     notificar('Abrindo o PDF...', 0);
     canvases = await renderizarPaginasPdf(arquivo, (pagina, total) => {

@@ -64,22 +64,16 @@ function atualizarChipPeriodo() {
   chip.classList.add('active');
 }
 
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+function formatarMoeda(valor) { return UI.moeda(valor); }
 
-function rotuloDia(dataISO) {
-  const data = new Date(dataISO);
-  const hoje = new Date();
-  const ontem = new Date();
-  ontem.setDate(hoje.getDate() - 1);
-
-  const mesmoDia = (a, b) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-
-  if (mesmoDia(data, hoje)) return `Hoje · ${data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
-  if (mesmoDia(data, ontem)) return `Ontem · ${data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
-  return data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+function rotuloDia(valorData) {
+  const dia = Datas.diaFinanceiro(valorData);
+  const hoje = Datas.hojeISO();
+  const diferenca = Datas.diferencaEmDias(dia, hoje);
+  const curto = Datas.formatarDia(dia, { day: '2-digit', month: 'short' });
+  if (diferenca === 0) return `Hoje · ${curto}`;
+  if (diferenca === 1) return `Ontem · ${curto}`;
+  return Datas.formatarDia(dia, { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
 function rotuloFormaPagamento(d) {
@@ -98,8 +92,7 @@ function rotuloFormaPagamento(d) {
 // 245,27 de setembro). Isso não muda a data real armazenada — só separa a
 // APRESENTAÇÃO em dois grupos quando a competência diverge.
 function chaveDia(item) {
-  const d = new Date(item.data);
-  return `${item.mesCompetencia || ''}|${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  return `${item.mesCompetencia || ''}|${Datas.diaFinanceiro(item.data)}`;
 }
 
 // Quando a competência financeira do item cai num mês diferente do mês da
@@ -109,11 +102,8 @@ function chaveDia(item) {
 // uma com a outra (regra 1: "Competência: Agosto/2026 · Compra em: 12/09/2026").
 function rotuloCompetenciaSeDiferente(item) {
   if (!item.mesCompetencia) return '';
-  const mesReal = item.data.slice(0, 7);
-  if (item.mesCompetencia === mesReal) return '';
-  const [ano, mes] = item.mesCompetencia.split('-').map(Number);
-  const nomeMes = new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  return ` · competência: ${nomeMes}`;
+  if (item.mesCompetencia === Datas.mesFinanceiro(item.data)) return '';
+  return ` · competência: ${Datas.rotuloMes(item.mesCompetencia)}`;
 }
 
 // Ordena a lista unificada por data decrescente. Quando duas datas empatam
@@ -127,8 +117,9 @@ function rotuloCompetenciaSeDiferente(item) {
 // data e parcelaAtual — itens sem parcelaAtual (receitas, despesas não
 // parceladas) tratam o desempate como 0, sem efeito nenhum sobre eles.
 function compararPorDataDesc(a, b) {
-  const diff = new Date(b.data) - new Date(a.data);
+  const diff = (Datas.diaFinanceiro(b.data) || '').localeCompare(Datas.diaFinanceiro(a.data) || '');
   if (diff !== 0) return diff;
+  if (a.mesCompetencia !== b.mesCompetencia) return (b.mesCompetencia || '').localeCompare(a.mesCompetencia || '');
   return (b.parcelaAtual || 0) - (a.parcelaAtual || 0);
 }
 
@@ -143,7 +134,7 @@ function itensUnificados() {
     cartaoNome: null,
     descricao: r.descricao,
     // competência financeira de uma receita = mês da própria data (regra 1C)
-    mesCompetencia: r.data.slice(0, 7)
+    mesCompetencia: DB.competenciaReceita(r)
   }));
   return [...despesas, ...receitas].sort(compararPorDataDesc);
 }
@@ -193,23 +184,25 @@ function renderLista() {
 
   let html = '';
   for (const [, itens] of grupos) {
-    const totalDia = itens.reduce((s, d) => s + (d.tipo === 'receita' ? d.valorParcela : -d.valorParcela), 0);
+    // previstas não entram no total do dia (não são gasto realizado)
+    const totalDia = itens.reduce((s, d) => d.statusDespesa === 'previsto' ? s : s + (d.tipo === 'receita' ? d.valorParcela : -d.valorParcela), 0);
+    const soPrevistas = itens.every((d) => d.statusDespesa === 'previsto');
     const sinalTotal = totalDia >= 0 ? '+ ' : '− ';
     html += `
       <div class="day-group">
         <div class="day-head">
           <span class="day-label">${rotuloDia(itens[0].data)}${rotuloCompetenciaSeDiferente(itens[0])}</span>
-          <span class="day-total">${sinalTotal}${formatarMoeda(Math.abs(totalDia))}</span>
+          <span class="day-total">${soPrevistas ? 'previsto' : sinalTotal + formatarMoeda(Math.abs(totalDia))}</span>
         </div>
         ${itens.map((d) => `
           <div class="txn-card">
             <button type="button" class="txn-more" title="Ações" onclick="abrirDetalheTransacao(${d.id}, '${d.tipo}')">⋯</button>
-            <div class="txn-icon">${d.categoriaIcone}</div>
+            <div class="txn-icon">${UI.escapar(d.categoriaIcone)}</div>
             <div class="txn-info">
-              <div class="txn-name">${d.descricao || d.categoriaNome}${d.statusDespesa === 'previsto' ? ' <span class=\'tag-previsto\'>Previsto</span>' : ''}</div>
-              <div class="txn-meta">${d.categoriaNome}${d.tipo === 'despesa' ? ' · ' + rotuloFormaPagamento(d) : ''}${d.parcelaTotal > 1 ? ` · parcela ${d.parcelaAtual}/${d.parcelaTotal}` : ''}</div>
+              <div class="txn-name">${UI.escapar(d.descricao || d.categoriaNome)}${d.statusDespesa === 'previsto' ? ' <span class=\'tag-previsto\'>Previsto</span>' : ''}${d.pendenteReconciliacao ? ' <span class=\'tag-revisao\'>Revisar</span>' : ''}</div>
+              <div class="txn-meta">${UI.escapar(d.categoriaNome)}${d.tipo === 'despesa' ? ' · ' + UI.escapar(rotuloFormaPagamento(d)) : ''}${d.parcelaTotal > 1 ? ` · parcela ${d.parcelaAtual}/${d.parcelaTotal}` : ''}</div>
             </div>
-            <div class="txn-value ${d.tipo === 'receita' ? 'income' : ''}">${d.tipo === 'receita' ? '+ ' : '− '}${formatarMoeda(d.valorParcela)}</div>
+            <div class="txn-value ${d.tipo === 'receita' ? 'income' : ''}"${d.statusDespesa === 'previsto' ? ' style="opacity:.6"' : ''}>${d.tipo === 'receita' ? '+ ' : '− '}${formatarMoeda(d.valorParcela)}</div>
           </div>
         `).join('')}
       </div>
@@ -255,21 +248,21 @@ async function abrirDetalheTransacao(id, tipo) {
     document.getElementById('detalheDescricao').value = registro.descricao || '';
     document.getElementById('detalheDescricao').placeholder = 'Descrição (opcional)';
 
-    const categorias = await DB.listarTodos('categoria');
+    const categorias = await DB.listarCategoriasAtivas();
     document.getElementById('detalheCategoriaChips').innerHTML = categorias.map((c) => `
-      <div class="chip ${c.id === registro.categoriaId ? 'selected' : ''}" data-id="${c.id}" onclick="selecionarCategoriaDetalhe(${c.id})">${c.icone} ${c.nome}</div>
+      <div class="chip ${c.id === registro.categoriaId ? 'selected' : ''}" data-id="${c.id}" onclick="selecionarCategoriaDetalhe(${c.id})">${UI.escapar(c.icone)} ${UI.escapar(c.nome)}</div>
     `).join('');
     document.getElementById('detalheCategoriaChips').dataset.selecionado = registro.categoriaId;
 
-    const cartoes = await DB.listarTodos('cartao');
+    const cartoes = (await DB.listarTodos('cartao')).filter((c) => !c.arquivado || c.id === registro.cartaoId);
     document.getElementById('detalheCartaoChips').innerHTML = cartoes.map((c) => `
-      <div class="chip ${c.id === registro.cartaoId ? 'selected' : ''}" data-id="${c.id}" onclick="selecionarCartaoDetalhe(${c.id})">💳 ${c.nome}</div>
+      <div class="chip ${c.id === registro.cartaoId ? 'selected' : ''}" data-id="${c.id}" onclick="selecionarCartaoDetalhe(${c.id})">💳 ${UI.escapar(c.nome)}</div>
     `).join('');
     document.getElementById('detalheCartaoChips').dataset.selecionado = registro.cartaoId || '';
 
     document.getElementById('blocoCategoriaDetalhe').style.display = 'block';
     document.getElementById('blocoCartaoDetalhe').style.display = 'block';
-    document.getElementById('detalheData').value = registro.data.slice(0, 10);
+    document.getElementById('detalheData').value = Datas.diaFinanceiro(registro.data) || '';
   } else {
     const registro = await DB.obterPorId('receita', id);
     document.getElementById('detalheTitulo').textContent = 'Editar receita';
@@ -279,7 +272,7 @@ async function abrirDetalheTransacao(id, tipo) {
     document.getElementById('detalheDescricao').placeholder = 'Descrição';
     document.getElementById('blocoCategoriaDetalhe').style.display = 'none';
     document.getElementById('blocoCartaoDetalhe').style.display = 'none';
-    document.getElementById('detalheData').value = registro.data.slice(0, 10);
+    document.getElementById('detalheData').value = Datas.diaFinanceiro(registro.data) || '';
   }
 
   document.getElementById('sheetOverlayDetalhe').classList.add('open');
@@ -321,9 +314,8 @@ async function salvarEdicaoTransacao() {
 
   const descricao = document.getElementById('detalheDescricao').value.trim();
 
-  const dataEscolhida = document.getElementById('detalheData').value; // "AAAA-MM-DD"
-  const [ano, mes, dia] = dataEscolhida.split('-').map(Number);
-  const dataFinal = new Date(ano, mes - 1, dia).toISOString();
+  const dataFinal = Datas.interpretarDiaDigitado(document.getElementById('detalheData').value);
+  if (!dataFinal) { alert('Data inválida.'); return; }
 
   if (transacaoEmEdicao.tipo === 'despesa') {
     const categoriaId = Number(document.getElementById('detalheCategoriaChips').dataset.selecionado);
@@ -333,9 +325,17 @@ async function salvarEdicaoTransacao() {
     if (!categoriaId) { alert('Escolha uma categoria.'); return; }
 
     const registro = await DB.obterPorId('despesa', transacaoEmEdicao.id);
-    // marca como editada manualmente: uma importação/reconciliação futura
-    // (Parte 2) não pode recriar nem desfazer silenciosamente essa alteração
-    await DB.atualizar('despesa', { ...registro, valor, descricao, categoriaId, cartaoId, data: dataFinal, editadoManualmente: true });
+    if (registro.faturaId != null && (registro.cartaoId || null) !== cartaoId) {
+      const ok = confirm(cartaoId
+        ? 'Mover este lançamento para outro cartão? Ele sai da fatura atual e entra na fatura do novo cartão (pelo dia de fechamento).'
+        : 'Tirar este lançamento do cartão? Ele sai da fatura e passa a contar pelo mês da data da compra.');
+      if (!ok) return;
+    }
+    // atualizarDespesaManual marca editadoManualmente (a reconciliação não
+    // sobrescreve), ajusta a fatura se o cartão mudar e recalcula totais
+    try {
+      await DB.atualizarDespesaManual(registro.id, { valor, descricao, categoriaId, cartaoId, data: dataFinal });
+    } catch (erro) { alert(erro.message); return; }
   } else {
     const registro = await DB.obterPorId('receita', transacaoEmEdicao.id);
     await DB.atualizar('receita', { ...registro, valor, descricao: descricao || 'Receita avulsa', data: dataFinal });
@@ -350,7 +350,8 @@ async function excluirTransacao() {
   const ok = confirm('Excluir esta transação? Essa ação não pode ser desfeita.');
   if (!ok) return;
 
-  await DB.remover(transacaoEmEdicao.tipo, transacaoEmEdicao.id);
+  if (transacaoEmEdicao.tipo === 'despesa') await DB.excluirDespesa(transacaoEmEdicao.id);
+  else await DB.remover('receita', transacaoEmEdicao.id);
   fecharModalDetalhe();
   await recarregarListaTransacoes();
 }

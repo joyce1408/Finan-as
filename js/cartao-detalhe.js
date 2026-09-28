@@ -1,267 +1,203 @@
-// cartao-detalhe.js — carrega o cartão pelo ?id= da URL e mostra fatura,
-// limite e compras reais daquele cartão no mês atual.
+// cartao-detalhe.js — Cartões → cartão → Faturas: fatura em destaque,
+// limite, lista de faturas (com os lançamentos de cada uma, pela
+// competência) e o fluxo de importação (CSV, PDF, OCR) com prévia completa
+// antes de gravar.
 
-const CORES_CARTAO_FIXAS = { 'Nubank': '#820AD1', 'Inter': '#FF7A00', 'Itaú': '#EC7000', 'Santander': '#EC0000', 'C6': '#242424', 'Bradesco': '#CC092F', 'Banco do Brasil': '#F8D117' };
+const CORES_CARTAO_FIXAS = { 'Nubank': '#820AD1', 'Inter': '#FF7A00', 'Itaú': '#EC7000', 'Santander': '#EC0000', 'C6': '#242424', 'Bradesco': '#CC092F', 'Banco do Brasil': '#C9A800' };
 
 function corParaCartao(nome) {
   if (CORES_CARTAO_FIXAS[nome]) return CORES_CARTAO_FIXAS[nome];
   let hash = 0;
   for (let i = 0; i < nome.length; i++) hash = nome.charCodeAt(i) + ((hash << 5) - hash);
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 55%, 40%)`;
+  return `hsl(${Math.abs(hash) % 360}, 55%, 40%)`;
 }
 
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+function formatarMoeda(valor) { return UI.moeda(valor); }
+const esc = (t) => UI.escapar(t);
 
 function getIdDaUrl() {
-  const params = new URLSearchParams(window.location.search);
-  return parseInt(params.get('id'), 10);
+  return parseInt(new URLSearchParams(window.location.search).get('id'), 10);
 }
 
-let limiteCartaoAtual = 0; // cache pra calcular a prévia sem salvar nada ainda
-let faturaDestaqueAtualId = null; // pra "Marcar como paga" saber qual fatura mexer
+let limiteCartaoAtual = 0;
+let faturaDestaqueAtualId = null;
+let faturasAbertas = new Set(); // faturas expandidas na lista
+
+function rotuloOrigem(f) {
+  if (f.origem === 'importada') return 'importada';
+  if (f.origem === 'aberta') return 'em aberto (lançamentos manuais)';
+  return f.datasConfirmadas ? 'reconstruída · datas confirmadas' : 'reconstruída · dados estimados, confira';
+}
 
 async function iniciar() {
   await DB.abrirBanco();
   await DB.seedInicial();
 
   const id = getIdDaUrl();
-  if (!id) {
-    document.getElementById('bankName').textContent = 'Cartão não encontrado';
-    return;
-  }
+  const cartao = id ? await DB.obterPorId('cartao', id) : null;
+  if (!cartao) { document.getElementById('bankName').textContent = 'Cartão não encontrado'; return; }
 
-  const cartao = await DB.obterPorId('cartao', id);
-  if (!cartao) {
-    document.getElementById('bankName').textContent = 'Cartão não encontrado';
-    return;
-  }
-
-  const cor = corParaCartao(cartao.nome);
-  document.getElementById('bankLogo').style.background = cor;
+  document.getElementById('bankLogo').style.background = corParaCartao(cartao.nome);
   document.getElementById('bankLogo').textContent = cartao.nome.slice(0, 2).toUpperCase();
-  document.getElementById('bankName').textContent = cartao.nome;
+  document.getElementById('bankName').textContent = cartao.nome + (cartao.arquivado ? ' (arquivado)' : '');
 
-  // A fatura em destaque vem sempre do registro real (importado ou
-  // reconstruído pela migração), nunca mais recalculada por data + dia de
-  // fechamento estimado do cartão (regra 19). Fatura não paga nunca some
-  // como R$0,00 (regra 11): se não existe nenhuma fatura ainda, a tela
-  // avisa isso explicitamente, em vez de mostrar um valor inventado.
   const fatura = await DB.faturaEmDestaquePorCartao(id);
   faturaDestaqueAtualId = fatura ? fatura.id : null;
   const acaoFaturaPaga = document.getElementById('acaoFaturaPaga');
 
-  // Correção 1 da homologação: "Fecha dia X · vence dia Y" precisa vir do
-  // fechamento/vencimento REAIS já persistidos NESTA fatura específica —
-  // nunca do dia de fechamento/vencimento genérico do CARTÃO
-  // (cartao.diaFechamento/diaVencimento), que é só a sugestão usada em
-  // NOVAS importações e pode ter sido corrigida depois que esta fatura já
-  // existia, ficando dessincronizada do dado real dela. Só cai no dia do
-  // cartão quando ainda não existe nenhuma fatura pra mostrar.
-  if (fatura && fatura.fechamento) {
-    const fech = new Date(fatura.fechamento);
-    const venc = new Date(fatura.vencimento);
-    document.getElementById('bankSub').textContent = `Fecha dia ${fech.getDate()} · vence dia ${venc.getDate()}`;
+  if (fatura && fatura.fechamentoDia) {
+    document.getElementById('bankSub').textContent = `Fatura ${Datas.rotuloMes(fatura.mesFatura)} · fecha ${Datas.formatarDia(fatura.fechamentoDia, { day: '2-digit', month: '2-digit' })} · vence ${Datas.formatarDia(fatura.vencimentoDia, { day: '2-digit', month: '2-digit' })}`;
   } else {
-    document.getElementById('bankSub').textContent = `Fecha dia ${cartao.diaFechamento} · vence dia ${cartao.diaVencimento}`;
+    document.getElementById('bankSub').textContent = cartao.diaFechamento
+      ? `Fecha dia ${cartao.diaFechamento} · vence dia ${cartao.diaVencimento}`
+      : `Vence dia ${cartao.diaVencimento} · cadastre o dia de fechamento (✏️)`;
   }
 
+  limiteCartaoAtual = cartao.limite;
   if (!fatura) {
-    document.getElementById('dueChip').textContent = '📅 Nenhuma fatura importada ainda';
+    document.getElementById('dueChip').textContent = '📅 Nenhuma fatura ainda';
     document.getElementById('valorFatura').textContent = formatarMoeda(0);
-    limiteCartaoAtual = cartao.limite;
     acaoFaturaPaga.innerHTML = '';
   } else {
-    const vencimento = new Date(fatura.vencimento);
-    const situacaoTexto = fatura.statusPagamento === 'paga'
-      ? 'Paga'
-      : (vencimento < new Date() ? 'Vencida — não paga' : 'Não paga');
-    const origemNota = fatura.origem === 'migrada' ? ' · dados estimados, confira' : '';
-    document.getElementById('dueChip').textContent =
-      `📅 Vence em ${vencimento.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })} · ${situacaoTexto}${origemNota}`;
+    const situacaoTexto = fatura.situacao === 'quitada' ? 'Paga' : fatura.situacao === 'vencida' ? 'Vencida, não paga' : 'Não paga';
+    document.getElementById('dueChip').textContent = `📅 Vence em ${Datas.formatarDia(fatura.vencimentoDia, { day: '2-digit', month: 'long' })} · ${situacaoTexto}${fatura.origem === 'importada' ? '' : ' · ' + rotuloOrigem(fatura)}`;
     document.getElementById('valorFatura').textContent = formatarMoeda(fatura.totalOficial);
-    limiteCartaoAtual = cartao.limite;
-
-    // "Marcar como paga" / "Desmarcar como paga": altera SOMENTE o status
-    // de pagamento da fatura (regra 14) — nunca despesas, valores, datas,
-    // mesFatura ou faturaId. Funciona igual pra qualquer cartão/banco.
     const botaoPagamento = fatura.statusPagamento === 'paga'
-      ? `<button type="button" class="acao-fatura-paga-btn desmarcar" onclick="alternarFaturaPaga()">↩️ Desmarcar como paga</button>`
-      : `<button type="button" class="acao-fatura-paga-btn" onclick="alternarFaturaPaga()">✅ Marcar como paga</button>`;
-
-    // Correção 1/4 da homologação: dá pra confirmar o fechamento/vencimento
-    // REAIS desta fatura (mesmo já paga) sem inventar nada — é a usuária
-    // quem informa o dado real, nunca uma inferência automática. Isso é o
-    // que faz "dados estimados, confira" (logo abaixo) parar de aparecer:
-    // esse aviso só depende de fatura.origem, e confirmar aqui promove a
-    // fatura pra origem 'importada' (mesma regra já usada quando uma
-    // importação real chega — regra 16).
-    const botaoCorrigirDatas = `<button type="button" class="acao-fatura-paga-btn corrigir" onclick="corrigirDatasFaturaAtual()">✏️ Corrigir fechamento/vencimento</button>`;
-
-    acaoFaturaPaga.innerHTML = botaoPagamento + botaoCorrigirDatas;
+      ? `<button type="button" class="acao-fatura-paga-btn desmarcar" onclick="alternarFaturaPaga(${fatura.id})">↩️ Desmarcar como paga</button>`
+      : `<button type="button" class="acao-fatura-paga-btn" onclick="alternarFaturaPaga(${fatura.id})">✅ Marcar como paga</button>`;
+    acaoFaturaPaga.innerHTML = botaoPagamento + `<button type="button" class="acao-fatura-paga-btn corrigir" onclick="corrigirDatasFatura(${fatura.id})">✏️ Corrigir fechamento/vencimento</button>`;
+    faturasAbertas.add(fatura.id);
   }
 
   const valorFatura = fatura ? fatura.totalOficial : 0;
-
   const percentual = cartao.limite > 0 ? (valorFatura / cartao.limite) * 100 : 0;
   const status = Motor.statusLimite(percentual);
   const corBarra = status === 'ok' ? 'var(--green)' : status === 'warn' ? 'var(--amber)' : 'var(--red)';
   const emAviso = percentual >= 80;
-
   document.getElementById('bankLogo').classList.toggle('estado-aviso', emAviso);
   document.getElementById('valorFatura').classList.toggle('estado-aviso', emAviso);
-
   document.getElementById('limitPct').textContent = `${percentual.toFixed(0)}%`;
   document.getElementById('limitPct').className = `limit-pct ${status}`;
   document.getElementById('limitFill').style.width = `${Math.min(percentual, 100).toFixed(0)}%`;
   document.getElementById('limitFill').style.background = corBarra;
+  const faixa = status === 'danger' ? 'alerta, você passou do limite seguro' : status === 'warn' ? 'atenção, você está perto do limite seguro' : 'dentro do limite seguro';
+  document.getElementById('limitNote').textContent = `${formatarMoeda(valorFatura)} usados de ${formatarMoeda(cartao.limite)} · ${faixa}.`;
 
-  const nota = status === 'danger'
-    ? `${formatarMoeda(valorFatura)} usados de ${formatarMoeda(cartao.limite)} · alerta, você passou do limite seguro.`
-    : status === 'warn'
-      ? `${formatarMoeda(valorFatura)} usados de ${formatarMoeda(cartao.limite)} · atenção, você está perto do limite seguro.`
-      : `${formatarMoeda(valorFatura)} usados de ${formatarMoeda(cartao.limite)} · dentro do limite seguro.`;
-  document.getElementById('limitNote').textContent = nota;
+  await renderFaturasELancamentos(id);
+}
 
-  const categorias = await DB.listarTodos('categoria');
-  const mapaCategoria = Object.fromEntries(categorias.map((c) => [c.id, c]));
-  const todasFaturasDoCartao = await DB.faturasPorCartao(id);
-  const mapaFatura = Object.fromEntries(todasFaturasDoCartao.map((f) => [f.id, f]));
-
-  const todasDespesas = await DB.listarTodos('despesa');
-  const compras = todasDespesas
-    .filter((d) => d.cartaoId === id)
-    .map((d) => {
-      const faturaDaDespesa = d.faturaId != null ? mapaFatura[d.faturaId] : null;
-      // a etiqueta agora só descreve o que já se sabe pelo faturaId real —
-      // nunca mais um "entra na próxima fatura" adivinhado por data (regra 3/19)
-      let etiquetaFatura = '';
-      if (faturaDaDespesa && fatura && faturaDaDespesa.id !== fatura.id) {
-        etiquetaFatura = ` · fatura ${faturaDaDespesa.mesFatura}`;
-      } else if (!faturaDaDespesa) {
-        etiquetaFatura = ' · ainda sem fatura vinculada';
-      }
-      return {
-        ...d,
-        categoriaIcone: mapaCategoria[d.categoriaId]?.icone || '💰',
-        categoriaNome: mapaCategoria[d.categoriaId]?.nome || 'Outros',
-        // regra 4: d.valor já é o valor da parcela, nunca dividir de novo
-        valorParcela: d.valor,
-        etiquetaFatura,
-        // Correção 2 da homologação: usada só pra ordenar (ver sort abaixo) —
-        // mesma função de competência de sempre, nunca uma lógica nova
-        mesCompetencia: DB.competenciaDespesa(d, mapaFatura)
-      };
-    })
-    // Correção 2: ordena por COMPETÊNCIA (não pela data real), com
-    // parcelaAtual como critério de desempate. Antes, ordenar só por
-    // "data" fazia uma parcela confirmada e a prevista seguinte, quando
-    // projetadas/registradas no mesmo dia (ex.: 8/12 real em 12/09 e 9/12
-    // prevista também projetada pro dia 12/09), ficarem "empatadas" e
-    // saírem fora de ordem cronológica de competência (ex.: 12,11,10,8,9
-    // em vez de 12,11,10,9,8). Nada disso muda parcelaAtual, parcelaTotal,
-    // valor, faturaId ou status — só a ordem de exibição.
-    .sort((a, b) => {
-      if (a.mesCompetencia !== b.mesCompetencia) return b.mesCompetencia > a.mesCompetencia ? 1 : -1;
-      if (a.parcelaAtual !== b.parcelaAtual) return (b.parcelaAtual || 0) - (a.parcelaAtual || 0);
-      return new Date(b.data) - new Date(a.data);
-    });
-  const listaCompras = document.getElementById('listaCompras');
-
-  if (compras.length === 0) {
-    listaCompras.innerHTML = `<div style="text-align:center;padding:30px 0;color:var(--ink-soft);font-size:13px">Nenhuma compra registrada neste cartão ainda.</div>`;
-  } else {
-    listaCompras.innerHTML = compras.map((c) => `
-      <div class="purchase-card">
-        <button type="button" class="txn-more" title="Ações" onclick="abrirAcoesCompra(${c.id})">⋯</button>
-        <div class="p-icon">${c.categoriaIcone}</div>
-        <div class="p-info">
-          <div class="p-name">${c.descricao || c.categoriaNome}${c.statusDespesa === 'previsto' ? ' <span class=\'tag-previsto\'>Previsto</span>' : ''}</div>
-          <div class="p-date">${new Date(c.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}${c.parcelaTotal > 1 ? ` · parcela ${c.parcelaAtual}/${c.parcelaTotal}` : ''}${c.etiquetaFatura}</div>
-        </div>
-        <div class="p-value">${formatarMoeda(c.valorParcela)}</div>
-      </div>
-    `).join('');
+// Lista de faturas do cartão (mais recente primeiro) com os lançamentos de
+// cada uma; previstas (sem fatura ainda) num grupo próprio.
+async function renderFaturasELancamentos(cartaoId) {
+  const [faturas, detalhadas] = await Promise.all([DB.faturasClassificadas(), DB.despesasDetalhadas()]);
+  const doCartao = faturas.filter((f) => f.cartaoId === cartaoId).sort((a, b) => b.mesFatura.localeCompare(a.mesFatura));
+  const despesasDoCartao = detalhadas.filter((d) => d.cartaoId === cartaoId || doCartao.some((f) => f.id === d.faturaId));
+  const porFatura = new Map(doCartao.map((f) => [f.id, []]));
+  const previstas = [];
+  const semFatura = [];
+  for (const d of despesasDoCartao) {
+    if (d.faturaId != null && porFatura.has(d.faturaId)) porFatura.get(d.faturaId).push(d);
+    else if (d.statusDespesa === 'previsto') previstas.push(d);
+    else semFatura.push(d);
   }
+
+  const ordenar = (lista) => lista.sort((a, b) => (b.dia || '').localeCompare(a.dia || '') || (b.parcelaAtual || 0) - (a.parcelaAtual || 0));
+  const linha = (c) => `
+    <div class="purchase-card">
+      <button type="button" class="txn-more" title="Ações" onclick="abrirAcoesCompra(${c.id})">⋯</button>
+      <div class="p-icon">${esc(c.categoriaIcone)}</div>
+      <div class="p-info">
+        <div class="p-name">${esc(c.descricao || c.categoriaNome)}${c.statusDespesa === 'previsto' ? ' <span class="tag-previsto">Previsto</span>' : ''}${c.pendenteReconciliacao ? ' <span class="tag-revisao">Revisar parcela</span>' : ''}</div>
+        <div class="p-date">${Datas.formatarDia(c.dia)} · ${esc(c.categoriaNome)}${c.parcelaTotal > 1 ? ` · parcela ${c.parcelaAtual}/${c.parcelaTotal}` : ''}${c.statusDespesa === 'previsto' ? ` · prevista para ${Datas.rotuloMes(c.mesCompetencia)}` : ''}</div>
+      </div>
+      <div class="p-value"${c.statusDespesa === 'previsto' ? ' style="opacity:.6"' : ''}>${formatarMoeda(c.valorParcela)}</div>
+    </div>`;
+
+  const blocos = [];
+  for (const f of doCartao) {
+    const itens = ordenar(porFatura.get(f.id));
+    const aberta = faturasAbertas.has(f.id);
+    const status = f.situacao === 'quitada' ? '✅ Paga' : f.situacao === 'vencida' ? '🔴 Vencida' : 'Não paga';
+    blocos.push(`
+      <div class="fatura-bloco" style="margin-bottom:12px">
+        <div class="purchase-card" style="cursor:pointer;background:var(--card)" onclick="alternarFatura(${f.id})">
+          <div class="p-icon">${aberta ? '▾' : '▸'}</div>
+          <div class="p-info">
+            <div class="p-name">Fatura ${Datas.rotuloMes(f.mesFatura)}</div>
+            <div class="p-date">${status} · vence ${Datas.formatarDia(f.vencimentoDia)} · ${itens.length} lançamento(s) · ${esc(rotuloOrigem(f))}</div>
+          </div>
+          <div class="p-value">${formatarMoeda(f.totalOficial)}</div>
+        </div>
+        ${f.divergencia ? `<div class="aviso-divergencia">⚠️ Os lançamentos somam ${formatarMoeda(f.divergencia.somaItens)}, acima do total oficial de ${formatarMoeda(f.divergencia.totalOficial)} (${formatarMoeda(f.divergencia.excesso)} a mais). Nenhum ajuste negativo foi criado: revise os itens.</div>` : ''}
+        ${aberta ? (itens.length === 0 ? '<div style="font-size:12px;color:var(--ink-soft);padding:6px 4px">Sem lançamentos.</div>' : itens.map(linha).join('')) : ''}
+      </div>`);
+  }
+  if (previstas.length > 0) {
+    blocos.push(`<div class="section-head-title" style="font-size:13px;font-weight:700;margin:16px 0 8px">Parcelas previstas (ainda sem fatura)</div>${ordenar(previstas).reverse().map(linha).join('')}`);
+  }
+  if (semFatura.length > 0) {
+    blocos.push(`<div class="section-head-title" style="font-size:13px;font-weight:700;margin:16px 0 8px">Sem fatura vinculada</div>${ordenar(semFatura).map(linha).join('')}`);
+  }
+  document.getElementById('listaCompras').innerHTML = blocos.length === 0
+    ? '<div style="text-align:center;padding:30px 0;color:var(--ink-soft);font-size:13px">Nenhuma fatura ou compra neste cartão ainda.</div>'
+    : blocos.join('');
+}
+
+function alternarFatura(id) {
+  if (faturasAbertas.has(id)) faturasAbertas.delete(id); else faturasAbertas.add(id);
+  renderFaturasELancamentos(getIdDaUrl());
 }
 
 iniciar();
 
-// ---------- Marcar/desmarcar fatura como paga (regra 14) ----------
-async function alternarFaturaPaga() {
-  if (!faturaDestaqueAtualId) return;
-  const fatura = await DB.obterPorId('fatura', faturaDestaqueAtualId);
+async function alternarFaturaPaga(faturaId) {
+  const fatura = await DB.obterPorId('fatura', faturaId);
   if (!fatura) return;
-
-  if (fatura.statusPagamento === 'paga') {
-    await DB.desmarcarFaturaComoPaga(faturaDestaqueAtualId);
-  } else {
-    await DB.marcarFaturaComoPaga(faturaDestaqueAtualId);
-  }
-
+  if (fatura.statusPagamento === 'paga') await DB.desmarcarFaturaComoPaga(faturaId);
+  else await DB.marcarFaturaComoPaga(faturaId);
   await iniciar();
 }
 
-// Correção 1/4 da homologação: confirma o fechamento/vencimento REAIS da
-// fatura em destaque — a usuária digita, nada é inferido/estimado aqui.
-// Não toca em totalOficial, statusPagamento, despesas vinculadas, mesFatura
-// nem cartaoId; só fechamento, vencimento, e a promoção de origem pra
-// 'importada' (dado real confirmado sempre prevalece — regra 16).
-async function corrigirDatasFaturaAtual() {
-  if (!faturaDestaqueAtualId) return;
-  const fatura = await DB.obterPorId('fatura', faturaDestaqueAtualId);
+async function corrigirDatasFatura(faturaId) {
+  const fatura = await DB.obterPorId('fatura', faturaId);
   if (!fatura) return;
-
-  const fechAtual = fatura.fechamento ? new Date(fatura.fechamento).toISOString().slice(0, 10) : '';
-  const vencAtual = fatura.vencimento ? new Date(fatura.vencimento).toISOString().slice(0, 10) : '';
-
-  const fechamentoTexto = prompt('Data REAL de fechamento desta fatura (confira na fatura do banco) — AAAA-MM-DD ou DD/MM/AAAA:', fechAtual);
-  if (fechamentoTexto === null) return; // cancelou, nada foi gravado
-  const fechamentoISO = ImportarFatura.parseDataFatura(fechamentoTexto.trim());
-  if (!fechamentoISO) { alert('Data de fechamento inválida. Use AAAA-MM-DD ou DD/MM/AAAA.'); return; }
-
-  const vencimentoTexto = prompt('Data REAL de vencimento desta fatura — AAAA-MM-DD ou DD/MM/AAAA:', vencAtual);
-  if (vencimentoTexto === null) return;
-  const vencimentoISO = ImportarFatura.parseDataFatura(vencimentoTexto.trim());
-  if (!vencimentoISO) { alert('Data de vencimento inválida. Use AAAA-MM-DD ou DD/MM/AAAA.'); return; }
-
-  await DB.corrigirDatasFatura(faturaDestaqueAtualId, { fechamento: fechamentoISO, vencimento: vencimentoISO });
+  const fechAtual = Datas.formatarDia(fatura.fechamento);
+  const vencAtual = Datas.formatarDia(fatura.vencimento);
+  const f = prompt('Data REAL de fechamento desta fatura (confira na fatura do banco), DD/MM/AAAA:', fechAtual === '—' ? '' : fechAtual);
+  if (f === null) return;
+  const fechamento = Datas.interpretarDiaDigitado(f);
+  if (!fechamento) { alert('Data de fechamento inválida. Use DD/MM/AAAA.'); return; }
+  const v = prompt('Data REAL de vencimento desta fatura, DD/MM/AAAA:', vencAtual === '—' ? '' : vencAtual);
+  if (v === null) return;
+  const vencimento = Datas.interpretarDiaDigitado(v);
+  if (!vencimento) { alert('Data de vencimento inválida. Use DD/MM/AAAA.'); return; }
+  await DB.corrigirDatasFatura(faturaId, { fechamento, vencimento });
   await iniciar();
 }
 
-// ---------- Importação unificada de fatura (foto, PDF ou CSV) ----------
+// ---------- Importação de fatura (CSV, PDF, foto) com prévia ----------
 
-let itensParaImportar = [];
-let valorTotalFaturaDetectado = null;
-let idCartaoAtual = null;
-let idCategoriaOutros = null;
+let importacao = null; // { itens, totalDetectado, origemArquivo, mesFatura, fechamento, vencimento, editouDatas }
 
 document.getElementById('inputFatura').addEventListener('change', async (e) => {
   const arquivo = e.target.files[0];
+  e.target.value = '';
   if (!arquivo) return;
-
-  idCartaoAtual = getIdDaUrl();
+  const cartao = await DB.obterPorId('cartao', getIdDaUrl());
+  if (!cartao) return;
+  if (!cartao.diaFechamento) {
+    alert('Antes de importar, edite o cartão (✏️) e informe o dia de fechamento real da fatura.');
+    return;
+  }
   const tipo = LerDocumento.detectarTipoArquivo(arquivo);
-
-  const categorias = await DB.listarTodos('categoria');
-  const outros = categorias.find((c) => c.nome === 'Outros');
-  idCategoriaOutros = outros ? outros.id : (categorias[0] ? categorias[0].id : null);
-
   if (tipo === 'csv') {
-    valorTotalFaturaDetectado = null;
-    const texto = await arquivo.text();
-    const resultado = ImportarFatura.parseFaturaCsv(texto);
-    itensParaImportar = resultado.validos;
-    renderPreviewImportacao(resultado);
+    const resultado = ImportarFatura.parseFaturaCsv(await arquivo.text());
+    await iniciarPrevia(resultado.validos, null, 'CSV', resultado.erros.length);
   } else if (tipo === 'pdf' || tipo === 'imagem') {
     await processarComOcr(arquivo, tipo);
   } else {
-    alert('Não reconheci esse tipo de arquivo. Envie uma foto, um PDF ou um CSV.');
+    alert('Não reconheci esse tipo de arquivo. Envie um CSV, um PDF ou uma foto.');
   }
-
-  e.target.value = ''; // permite selecionar o mesmo arquivo de novo depois
 });
 
 async function processarComOcr(arquivo, tipo) {
@@ -271,9 +207,7 @@ async function processarComOcr(arquivo, tipo) {
     <div class="ocr-progresso">
       <div class="ocr-progresso-texto" id="ocrTexto">${tipo === 'pdf' ? 'Abrindo o PDF...' : 'Lendo a imagem...'}</div>
       <div class="ocr-progresso-track"><div class="ocr-progresso-fill" id="ocrBarra" style="width:0%"></div></div>
-    </div>
-  `;
-
+    </div>`;
   try {
     const texto = await LerDocumento.extrairTextoDoDocumento(arquivo, (mensagem, pct) => {
       const barra = document.getElementById('ocrBarra');
@@ -281,303 +215,193 @@ async function processarComOcr(arquivo, tipo) {
       if (barra) barra.style.width = Math.round(pct) + '%';
       if (label) label.textContent = mensagem;
     });
-
     const parse = OcrFatura.parseTextoOCR(texto);
-    valorTotalFaturaDetectado = OcrFatura.extrairValorTotal(texto);
     progresso.style.display = 'none';
     progresso.innerHTML = '';
-    renderPreviewOcr(parse);
+    await iniciarPrevia(parse.validos, OcrFatura.extrairValorTotal(texto), tipo === 'pdf' ? 'PDF' : 'foto (OCR)', parse.ignoradas.length);
   } catch (err) {
-    const mensagemEspecifica = err && err.message ? err.message : null;
-    const mensagemPadrao = tipo === 'pdf' ? 'Não consegui ler esse PDF.' : 'Não consegui ler essa imagem. Tente uma foto mais nítida, com boa luz.';
-    progresso.innerHTML = `<div style="text-align:center;padding:14px;color:var(--red);font-size:12.5px">${mensagemEspecifica || mensagemPadrao}</div>`;
+    const padrao = tipo === 'pdf' ? 'Não consegui ler esse PDF.' : 'Não consegui ler essa imagem. Tente uma foto mais nítida, com boa luz.';
+    progresso.innerHTML = `<div style="text-align:center;padding:14px;color:var(--red);font-size:12.5px">${esc((err && err.message) || padrao)}</div>`;
   }
 }
 
-function renderPreviewImportacao(resultado) {
-  const box = document.getElementById('previewImportacao');
-
-  if (resultado.validos.length === 0 && resultado.erros.length === 0) {
-    box.innerHTML = '';
-    return;
-  }
-
-  const totalImportar = resultado.validos.reduce((s, i) => s + i.valor, 0);
-
-  box.innerHTML = `
-    <div class="import-preview">
-      <div class="import-preview-title">${resultado.validos.length} compras encontradas — ${formatarMoeda(totalImportar)}</div>
-      ${resultado.erros.length > 0 ? `<div class="import-preview-sub erro">${resultado.erros.length} linha(s) ignorada(s) por erro de formato</div>` : `<div class="import-preview-sub">Confira antes de confirmar a importação</div>`}
-      <div class="import-item-list">
-        ${resultado.validos.map((item) => `
-          <div class="import-item">
-            <div>
-              <div class="import-item-desc">${item.descricao}</div>
-              <div class="import-item-date">${new Date(item.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</div>
-            </div>
-            <div class="import-item-value">${formatarMoeda(item.valor)}</div>
-          </div>
-        `).join('')}
-      </div>
-      <div class="import-actions">
-        <button class="import-cancel" onclick="cancelarImportacao()">Cancelar</button>
-        <button class="import-confirm" onclick="confirmarImportacao()" ${resultado.validos.length === 0 ? 'disabled' : ''}>Importar ${resultado.validos.length} compras</button>
-      </div>
-    </div>
-  `;
-}
-
-function cancelarImportacao() {
-  itensParaImportar = [];
-  valorTotalFaturaDetectado = null;
-  document.getElementById('previewImportacao').innerHTML = '';
-  document.getElementById('valorFatura').style.opacity = '1';
-  document.getElementById('limitFill').style.opacity = '1';
-  iniciar(); // restaura os valores reais no card e na barra (a prévia não foi salva)
-}
-
-// ---------- Sugestões para a importação (regra 1) ----------
-// Tudo aqui é só uma SUGESTÃO pré-preenchida nos prompts — quem decide e
-// confirma o mês da fatura, o vencimento e o total oficial é sempre a
-// usuária. Nada disso é gravado sem confirmação.
-
-// Sugere o mês da fatura como o mês mais frequente entre os itens
-// reconhecidos (empate resolvido pelo mês mais antigo). Isso é só o ponto de
-// partida do prompt — nunca o valor final gravado.
-function sugerirMesFatura(itens) {
+// Mês sugerido: o mês de fatura mais frequente entre os itens, calculado pelo
+// dia de fechamento do cartão (compra até o fechamento → fatura do mês
+// anterior ao fechamento). É só a sugestão inicial; a pessoa confirma.
+function sugerirMesFatura(itens, cartao) {
   if (itens.length === 0) return DB.mesAnteriorISO();
   const contagem = new Map();
   for (const item of itens) {
-    const mes = item.data.slice(0, 7);
+    const mes = DB.mesFaturaParaCompra(cartao, item.data) || Datas.mesFinanceiro(item.data);
     contagem.set(mes, (contagem.get(mes) || 0) + 1);
   }
-  let melhorMes = null;
-  let melhorContagem = -1;
-  for (const [mes, qtd] of [...contagem.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    if (qtd > melhorContagem) { melhorContagem = qtd; melhorMes = mes; }
-  }
-  return melhorMes;
+  return [...contagem.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
 }
 
-// Sugere a data de fechamento REAL desta fatura a partir do dia de
-// fechamento configurado no cartão (nunca mais calculado como
-// vencimento - 9, regra 3) — o fechamento de uma fatura de competência
-// mesFatura cai, por convenção do sistema bancário, no mês seguinte.
-function calcularFechamento(mesFatura, diaFechamento) {
-  const mesFechamento = DB.somarMesISO(mesFatura, 1);
-  const [ano, mes] = mesFechamento.split('-').map(Number);
-  return new Date(ano, mes - 1, diaFechamento).toISOString();
-}
-
-// Sugere a data de vencimento (só o texto do prompt, "AAAA-MM-DD") a partir
-// do dia de vencimento e de fechamento configurados no cartão.
-function sugerirVencimento(mesFatura, cartao) {
-  const mesFechamento = DB.somarMesISO(mesFatura, 1);
-  const diaFech = cartao.diaFechamento;
-  const diaVenc = cartao.diaVencimento;
-  const mesVencimento = diaVenc >= diaFech ? mesFechamento : DB.somarMesISO(mesFechamento, 1);
-  const [ano, mes] = mesVencimento.split('-').map(Number);
-  return `${ano}-${String(mes).padStart(2, '0')}-${String(diaVenc).padStart(2, '0')}`;
-}
-
-async function confirmarImportacao() {
-  if (itensParaImportar.length === 0) return;
-
-  const cartao = await DB.obterPorId('cartao', idCartaoAtual);
-  if (!cartao) { alert('Cartão não encontrado.'); return; }
-  if (!cartao.diaFechamento) {
-    alert('Antes de importar, edite o cartão (✏️) e informe o dia de fechamento real da fatura — confira na sua fatura do banco.');
-    return;
-  }
-
-  // Evita reimportar a mesma compra se esse arquivo (ou uma foto da mesma
-  // fatura) já tiver sido importado antes — compara valor, data e descrição
-  // contra o que já existe no banco, em qualquer cartão.
-  const despesasExistentes = await DB.listarTodos('despesa');
-  function jaFoiImportada(item) {
-    return despesasExistentes.some((d) =>
-      Math.abs(d.valor - item.valor) < 0.01 &&
-      d.data.slice(0, 10) === item.data.slice(0, 10) &&
-      d.descricao === item.descricao
-    );
-  }
-
-  const itensNovos = [];
-  let jaExistiam = 0;
-  for (const item of itensParaImportar) {
-    if (jaFoiImportada(item)) jaExistiam++;
-    else itensNovos.push(item);
-  }
-
-  if (itensNovos.length === 0) {
-    alert(`Nenhuma compra nova pra importar — ${jaExistiam} já existiam no seu histórico (mesmo valor, data e descrição).`);
-    itensParaImportar = [];
-    valorTotalFaturaDetectado = null;
-    document.getElementById('previewImportacao').innerHTML = '';
-    await iniciar();
-    return;
-  }
-
-  // Regra 1: o mês da fatura (competência) é o dado que a usuária confirma
-  // aqui, nunca uma estimativa baseada na data da compra ou no dia de
-  // fechamento — isso vira fatura.mesFatura direto, sem depender de
-  // nenhuma migração posterior pra descobrir a qual fatura a despesa pertence.
-  const mesFaturaTexto = prompt(
-    'Qual é o mês desta fatura (competência)? Formato AAAA-MM — confira no topo/resumo da fatura do banco.',
-    sugerirMesFatura(itensNovos)
-  );
-  if (mesFaturaTexto === null) return; // cancelou, nada foi gravado
-  const mesFatura = mesFaturaTexto.trim();
-  if (!/^\d{4}-\d{2}$/.test(mesFatura)) { alert('Formato inválido. Use AAAA-MM, por exemplo 2026-08.'); return; }
-
-  const vencimentoTexto = prompt('Data de vencimento desta fatura (AAAA-MM-DD):', sugerirVencimento(mesFatura, cartao));
-  if (vencimentoTexto === null) return;
-  const vencimentoISO = ImportarFatura.parseDataFatura(vencimentoTexto.trim());
-  if (!vencimentoISO) { alert('Data de vencimento inválida. Use AAAA-MM-DD ou DD/MM/AAAA.'); return; }
-
-  const totalImportado = itensNovos.reduce((s, i) => s + i.valor, 0);
-  const totalSugerido = valorTotalFaturaDetectado !== null ? valorTotalFaturaDetectado : totalImportado;
-  const totalTexto = prompt('Valor TOTAL OFICIAL desta fatura (confira no boleto/fatura do banco):', totalSugerido.toFixed(2).replace('.', ','));
-  if (totalTexto === null) return;
-  const totalOficial = ImportarFatura.parseValorMonetario(totalTexto);
-  if (isNaN(totalOficial) || totalOficial <= 0) { alert('Valor total inválido.'); return; }
-
-  // Regra 3/4: detecta "Parcela 8/12" (etc.) na descrição reconhecida — só
-  // quando o padrão aparece de verdade, nunca confundindo com uma data
-  // (regra do extrairParcela: exige a palavra "parcela" do lado). Compra sem
-  // esse padrão continua parcelaAtual/parcelaTotal 1/1 (à vista), como sempre.
-  const itensParaGravar = itensNovos.map((item) => {
+async function iniciarPrevia(itensLidos, totalDetectado, origemArquivo, linhasIgnoradas) {
+  const cartao = await DB.obterPorId('cartao', getIdDaUrl());
+  const idsPorNome = {};
+  for (const c of await DB.listarCategoriasAtivas()) idsPorNome[c.nome] = c.id;
+  const itens = [];
+  for (const item of itensLidos) {
+    const sugestao = await DB.sugerirCategoria(item.descricao);
     const parcela = ImportarFatura.extrairParcela(item.descricao);
-    return {
-      valor: item.valor,
-      data: item.data,
-      descricao: item.descricao,
-      categoriaId: idCategoriaOutros,
-      parcelaAtual: parcela ? parcela.parcelaAtual : 1,
-      parcelaTotal: parcela ? parcela.parcelaTotal : 1
-    };
-  });
-
-  // Regra do Valor Total de Segurança (mantida): se o total oficial
-  // confirmado é maior que a soma dos itens reconhecidos linha por linha,
-  // lança a diferença como um ajuste na mesma fatura — garante que a fatura
-  // bate com o valor real do banco mesmo quando alguma linha não foi
-  // reconhecida (por OCR ou por não constar no CSV).
-  const diferenca = totalOficial - totalImportado;
-  if (diferenca > 0.01) {
-    const dataDoAjuste = itensNovos.reduce((maisRecente, item) => item.data > maisRecente ? item.data : maisRecente, itensNovos[0].data);
-    itensParaGravar.push({
-      valor: diferenca,
-      data: dataDoAjuste,
-      descricao: 'Outros Gastos da Fatura (Ajuste)',
-      categoriaId: idCategoriaOutros
-    });
+    itens.push({ ...item, data: Datas.diaFinanceiro(item.data), categoriaId: sugestao.categoriaId, categoriaManual: false, parcela });
   }
+  const mesFatura = sugerirMesFatura(itens, cartao);
+  const datas = DB.datasEstimadasDaFatura(cartao, mesFatura);
+  const soma = itens.reduce((s, i) => s + Math.round(i.valor * 100), 0) / 100;
+  importacao = {
+    itens, origemArquivo, linhasIgnoradas, cartao, mesFatura,
+    fechamento: datas.fechamento, vencimento: datas.vencimento, editouDatas: false,
+    totalOficial: totalDetectado !== null && totalDetectado !== undefined ? totalDetectado : soma,
+    totalDetectado
+  };
+  await renderPrevia();
+}
 
-  const fechamentoISO = calcularFechamento(mesFatura, cartao.diaFechamento);
-
-  const resultado = await DB.importarFatura(
-    {
-      cartaoId: idCartaoAtual,
-      mesFatura,
-      vencimento: vencimentoISO,
-      fechamento: fechamentoISO,
-      cicloFim: fechamentoISO,
-      statusPagamento: 'nao_paga',
-      totalOficial
-    },
-    itensParaGravar
+async function renderPrevia() {
+  const box = document.getElementById('previewImportacao');
+  if (!importacao) { box.innerHTML = ''; return; }
+  const { itens, cartao } = importacao;
+  const categorias = await DB.listarCategoriasAtivas();
+  const previa = await DB.previaImportacaoFatura(
+    { cartaoId: cartao.id, mesFatura: importacao.mesFatura, totalOficial: importacao.totalOficial },
+    itens
   );
 
-  let mensagem = `${itensParaGravar.length} lançamento(s) importado(s) pra fatura de ${mesFatura}.`;
-  if (jaExistiam > 0) mensagem += ` ${jaExistiam} já existiam no seu histórico e foram pulados, pra não duplicar.`;
-  if (!resultado.criada) mensagem += ' Já existia uma fatura desse cartão nesse mês — os lançamentos foram vinculados a ela, sem criar fatura duplicada.';
-  if (resultado.revisaoNecessaria.length > 0) {
-    mensagem += ` Atenção: ${resultado.revisaoNecessaria.length} lançamento(s) parcelado(s) bateram com mais de uma previsão existente — não mesclei sozinho, pra não errar. Confira manualmente essas compras em "Compras deste cartão".`;
-  }
-  alert(mensagem);
-
-  itensParaImportar = [];
-  valorTotalFaturaDetectado = null;
-  window.location.reload(); // recarrega tudo do zero: fatura, limite, lista de compras, avisos
-}
-
-// ---------- Leitura de fatura por foto/PDF (OCR local via Tesseract.js + PDF.js) ----------
-// (o disparo agora acontece pelo roteador único do input #inputFatura, acima)
-
-// Mostra no card azul e na barra de limite uma PRÉVIA do valor total antes
-// de confirmar a importação — deixa claro que ainda não foi salvo, pra não
-// parecer que já importou se a usuária sair da tela sem confirmar.
-function mostrarPreviaFatura(valorPrevia) {
-  const valorAtual = document.getElementById('valorFatura');
-  valorAtual.textContent = `${formatarMoeda(valorPrevia)} (prévia)`;
-  valorAtual.style.opacity = '0.75';
-
-  if (limiteCartaoAtual > 0) {
-    const percentual = (valorPrevia / limiteCartaoAtual) * 100;
-    const status = Motor.statusLimite(percentual);
-    const corBarra = status === 'ok' ? 'var(--green)' : status === 'warn' ? 'var(--amber)' : 'var(--red)';
-
-    document.getElementById('limitPct').textContent = `${percentual.toFixed(0)}% (prévia)`;
-    document.getElementById('limitFill').style.width = `${Math.min(percentual, 100).toFixed(0)}%`;
-    document.getElementById('limitFill').style.background = corBarra;
-    document.getElementById('limitFill').style.opacity = '0.6';
-  }
-}
-
-function renderPreviewOcr(parse) {
-  itensParaImportar = parse.validos;
-  const box = document.getElementById('previewImportacao');
-
-  const totalImportar = parse.validos.reduce((s, i) => s + i.valor, 0);
-  const diferenca = valorTotalFaturaDetectado !== null ? valorTotalFaturaDetectado - totalImportar : null;
-  const totalComAjuste = diferenca !== null && diferenca > 0.01 ? totalImportar + diferenca : totalImportar;
-  mostrarPreviaFatura(totalComAjuste);
+  const avisos = [];
+  if (importacao.linhasIgnoradas > 0) avisos.push(`<div class="import-preview-sub erro">${importacao.linhasIgnoradas} linha(s) do arquivo não foram reconhecidas. Confira se não falta nada.</div>`);
+  if (previa.reimportacao) avisos.push(`<div class="import-preview-sub" style="color:var(--blue);font-weight:600">Já existe fatura deste cartão em ${Datas.rotuloMes(importacao.mesFatura)}: é uma REIMPORTAÇÃO. ${previa.jaExistentes} item(ns) já gravado(s) serão ignorados; o status de pagamento não muda.</div>`);
+  if (previa.ajusteOcr > 0) avisos.push(`<div class="import-preview-sub" style="color:var(--blue);font-weight:600">Diferença de ${formatarMoeda(previa.ajusteOcr)} entre o total oficial e os itens: vira um único lançamento "Outros Gastos da Fatura (Ajuste OCR)".</div>`);
+  if (previa.somaAcimaDoTotal > 0) avisos.push(`<div class="aviso-divergencia">⚠️ A soma dos itens passa o total oficial em ${formatarMoeda(previa.somaAcimaDoTotal)}. Nenhum ajuste negativo será criado. Revise os itens ou o total antes de confirmar.</div>`);
 
   box.innerHTML = `
     <div class="import-preview">
-      <div class="import-preview-title">${parse.validos.length} compras reconhecidas — ${formatarMoeda(totalImportar)}</div>
-      ${parse.ignoradas.length > 0 ? `<div class="import-preview-sub erro">${parse.ignoradas.length} linha(s) da imagem não foram reconhecidas — confira se não falta nada e cadastre manualmente se precisar</div>` : `<div class="import-preview-sub">Confira antes de confirmar — leitura por foto pode errar</div>`}
-      ${valorTotalFaturaDetectado !== null ? `
-        <div class="import-preview-sub" style="color:var(--blue);font-weight:600">
-          Total da fatura identificado: ${formatarMoeda(valorTotalFaturaDetectado)}
-          ${diferenca > 0.01 ? ` — diferença de ${formatarMoeda(diferenca)} será lançada como "Outros Gastos da Fatura (Ajuste OCR)"` : ' — bateu certinho com as compras reconhecidas'}
-        </div>
-      ` : ''}
+      <div class="import-preview-title">Prévia da importação (${esc(importacao.origemArquivo)}) · nada foi gravado ainda</div>
+      <div class="field-label">Cartão</div>
+      <div class="text-input" style="background:#fff">${esc(cartao.nome)}</div>
+      <div class="field-label">Mês da fatura (competência)</div>
+      <input type="month" class="text-input" id="impMes" value="${importacao.mesFatura}" onchange="alterarCampoPrevia('mes', this.value)">
+      <div class="field-label">Fechamento</div>
+      <input type="date" class="text-input" id="impFechamento" value="${importacao.fechamento}" onchange="alterarCampoPrevia('fechamento', this.value)">
+      <div class="field-label">Vencimento</div>
+      <input type="date" class="text-input" id="impVencimento" value="${importacao.vencimento}" onchange="alterarCampoPrevia('vencimento', this.value)">
+      <div class="field-label">Total oficial da fatura${importacao.totalDetectado !== null && importacao.totalDetectado !== undefined ? ' (lido do arquivo, confira)' : ' (confira no boleto/fatura)'}</div>
+      <input type="text" inputmode="numeric" class="text-input" id="impTotal" onchange="alterarCampoPrevia('total', this.value)">
+      <div class="import-preview-sub" style="margin-top:10px">
+        <strong>${previa.quantidadeItens}</strong> item(ns) · soma ${formatarMoeda(previa.somaItens)} · total oficial ${formatarMoeda(previa.totalOficial)}
+      </div>
+      ${avisos.join('')}
       <div class="import-item-list">
-        ${parse.validos.map((item, i) => `
-          <div class="import-item">
-            <div>
-              <div class="import-item-desc">${item.descricao}</div>
-              <div class="import-item-date">${new Date(item.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</div>
+        ${itens.map((item, i) => `
+          <div class="import-item" style="flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <div>
+                <div class="import-item-desc">${esc(item.descricao)}</div>
+                <div class="import-item-date">${Datas.formatarDia(item.data)}${item.parcela ? ` · parcela ${item.parcela.parcelaAtual}/${item.parcela.parcelaTotal}` : ''}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="import-item-value">${formatarMoeda(item.valor)}</div>
+                <button onclick="removerItemPrevia(${i})" aria-label="Remover item" style="background:none;border:none;color:var(--red);font-size:14px">✕</button>
+              </div>
             </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <div class="import-item-value">${formatarMoeda(item.valor)}</div>
-              <button onclick="removerItemOcr(${i})" style="background:none;border:none;color:var(--red);font-size:14px">✕</button>
-            </div>
-          </div>
-        `).join('')}
+            <select class="text-input" style="padding:6px 8px;font-size:12px" onchange="alterarCategoriaItem(${i}, this.value)">
+              ${categorias.map((c) => `<option value="${c.id}" ${c.id === item.categoriaId ? 'selected' : ''}>${esc(c.icone)} ${esc(c.nome)}</option>`).join('')}
+            </select>
+          </div>`).join('')}
       </div>
       <div class="import-actions">
         <button class="import-cancel" onclick="cancelarImportacao()">Cancelar</button>
-        <button class="import-confirm" onclick="confirmarImportacao()" ${parse.validos.length === 0 ? 'disabled' : ''}>Importar ${parse.validos.length} compras</button>
+        <button class="import-confirm" onclick="confirmarImportacao()">Confirmar e gravar</button>
       </div>
-    </div>
-  `;
+    </div>`;
+  const campoTotal = document.getElementById('impTotal');
+  aplicarMascaraMoeda(campoTotal);
+  definirValorMascarado(campoTotal, importacao.totalOficial);
 }
 
-function removerItemOcr(indice) {
-  itensParaImportar.splice(indice, 1);
-  renderPreviewOcr({ validos: itensParaImportar, ignoradas: [] });
+async function alterarCampoPrevia(campo, valor) {
+  if (!importacao) return;
+  if (campo === 'mes' && Datas.ehMesISO(valor)) {
+    importacao.mesFatura = valor;
+    if (!importacao.editouDatas) {
+      const d = DB.datasEstimadasDaFatura(importacao.cartao, valor);
+      importacao.fechamento = d.fechamento;
+      importacao.vencimento = d.vencimento;
+    }
+  } else if (campo === 'fechamento' && Datas.ehDiaISO(valor)) {
+    importacao.fechamento = valor; importacao.editouDatas = true;
+  } else if (campo === 'vencimento' && Datas.ehDiaISO(valor)) {
+    importacao.vencimento = valor; importacao.editouDatas = true;
+  } else if (campo === 'total') {
+    const v = valorNumericoDoInput(document.getElementById('impTotal'));
+    if (!isNaN(v)) importacao.totalOficial = v;
+  }
+  await renderPrevia();
+}
+
+function alterarCategoriaItem(indice, valor) {
+  importacao.itens[indice].categoriaId = Number(valor);
+  importacao.itens[indice].categoriaManual = true; // escolha da pessoa vence a automática
+}
+
+async function removerItemPrevia(indice) {
+  importacao.itens.splice(indice, 1);
+  await renderPrevia();
+}
+
+function cancelarImportacao() {
+  importacao = null;
+  document.getElementById('previewImportacao').innerHTML = '';
+}
+
+async function confirmarImportacao() {
+  if (!importacao) return;
+  const v = valorNumericoDoInput(document.getElementById('impTotal'));
+  if (!isNaN(v)) importacao.totalOficial = v;
+  const { cartao, mesFatura, fechamento, vencimento, totalOficial, itens } = importacao;
+  if (!Datas.ehMesISO(mesFatura)) { alert('Informe o mês da fatura.'); return; }
+  if (!Datas.ehDiaISO(fechamento) || !Datas.ehDiaISO(vencimento)) { alert('Informe fechamento e vencimento.'); return; }
+  if (!(totalOficial >= 0)) { alert('Informe o total oficial da fatura.'); return; }
+  if (itens.length === 0 && totalOficial === 0) { alert('Nada para importar.'); return; }
+
+  let r;
+  try {
+    r = await DB.importarFatura(
+      { cartaoId: cartao.id, mesFatura, fechamento, vencimento, totalOficial },
+      itens.map((i) => ({
+        data: i.data, descricao: i.descricao, valor: i.valor,
+        categoriaId: i.categoriaManual ? i.categoriaId : null, categoriaManual: i.categoriaManual,
+        parcelaAtual: i.parcela ? i.parcela.parcelaAtual : undefined, parcelaTotal: i.parcela ? i.parcela.parcelaTotal : undefined
+      }))
+    );
+  } catch (erro) {
+    alert(`Nada foi gravado: ${erro.message}`);
+    return;
+  }
+
+  const linhas = [`Fatura ${Datas.rotuloMes(mesFatura)} ${r.criada ? 'criada' : 'atualizada (reimportação)'}.`];
+  if (r.inseridos.length) linhas.push(`${r.inseridos.length} lançamento(s) novo(s).`);
+  if (r.reconciliados.length) linhas.push(`${r.reconciliados.length} lançamento(s) ligado(s) a previsões ou lançamentos manuais (sem duplicar).`);
+  if (r.ignoradosJaExistentes) linhas.push(`${r.ignoradosJaExistentes} já existiam e foram ignorados.`);
+  if (r.ajuste.acao === 'criado' || r.ajuste.acao === 'atualizado') linhas.push(`Ajuste OCR: ${formatarMoeda(r.ajuste.valor)}.`);
+  if (r.ajuste.acao === 'removido') linhas.push('Ajuste OCR não é mais necessário e foi retirado.');
+  if (r.divergencia) linhas.push(`Atenção: itens somam ${formatarMoeda(r.divergencia.somaItens)}, acima do total oficial. Revise.`);
+  if (r.revisaoNecessaria.length) linhas.push(`${r.revisaoNecessaria.length} parcela(s) não puderam ser ligadas com segurança a um parcelamento: marcadas para revisão.`);
+  alert(linhas.join('\n'));
+
+  importacao = null;
+  document.getElementById('previewImportacao').innerHTML = '';
+  faturasAbertas.add(r.faturaId);
+  await iniciar();
 }
 
 // ---------- Edição e exclusão do cartão ----------
 
 async function abrirModalEdicao() {
-  const id = getIdDaUrl();
-  const cartao = await DB.obterPorId('cartao', id);
+  const cartao = await DB.obterPorId('cartao', getIdDaUrl());
   if (!cartao) return;
-
   document.getElementById('inputNomeCartao').value = cartao.nome;
   aplicarMascaraMoeda(document.getElementById('inputLimiteCartao'));
   definirValorMascarado(document.getElementById('inputLimiteCartao'), cartao.limite);
@@ -586,47 +410,28 @@ async function abrirModalEdicao() {
   document.getElementById('sheetOverlay').classList.add('open');
 }
 
-function fecharModal() {
-  document.getElementById('sheetOverlay').classList.remove('open');
-}
-
-function fecharModalSeClicarFora(event) {
-  if (event.target.id === 'sheetOverlay') fecharModal();
-}
+function fecharModal() { document.getElementById('sheetOverlay').classList.remove('open'); }
+function fecharModalSeClicarFora(event) { if (event.target.id === 'sheetOverlay') fecharModal(); }
 
 async function salvarEdicaoCartao() {
-  const id = getIdDaUrl();
-  const cartao = await DB.obterPorId('cartao', id);
+  const cartao = await DB.obterPorId('cartao', getIdDaUrl());
   if (!cartao) return;
-
   const nome = document.getElementById('inputNomeCartao').value.trim();
   const limite = valorNumericoDoInput(document.getElementById('inputLimiteCartao'));
   const diaVencimento = parseInt(document.getElementById('inputVencimentoCartao').value, 10);
-  // Regra 3 do diagnóstico: fechamento real, digitado — nunca mais
-  // "vencimento - 9".
   const diaFechamento = parseInt(document.getElementById('inputFechamentoCartao').value, 10);
-
   if (!nome) { alert('Informe o nome do banco.'); return; }
   if (!limite || limite <= 0) { alert('Informe um limite válido.'); return; }
   if (!diaVencimento || diaVencimento < 1 || diaVencimento > 31) { alert('Informe um dia de vencimento válido (1 a 31).'); return; }
-  if (!diaFechamento || diaFechamento < 1 || diaFechamento > 31) { alert('Informe o dia de fechamento real da fatura (1 a 31) — confira na sua fatura do banco.'); return; }
-
-  await DB.atualizar('cartao', {
-    ...cartao,
-    nome,
-    limite,
-    diaFechamento,
-    diaVencimento
-  });
-
+  if (!diaFechamento || diaFechamento < 1 || diaFechamento > 31) { alert('Informe o dia de fechamento real da fatura (1 a 31).'); return; }
+  // muda só a regra para lançamentos FUTUROS; faturas já existentes guardam
+  // o próprio fechamento/vencimento e não são alteradas
+  await DB.atualizar('cartao', { ...cartao, nome, limite, diaFechamento, diaVencimento });
   fecharModal();
   await iniciar();
 }
 
-// ---------- Ações de um lançamento (Editar / Excluir) ----------
-// As ações previstas aqui são só Editar e Excluir — não existe ainda
-// nenhuma detecção de lançamentos duplicados/mesclagem no app, então essa
-// ação não é oferecida por enquanto (fica pendente pra quando existir).
+// ---------- Editar / excluir um lançamento ----------
 
 let compraEmEdicaoId = null;
 
@@ -634,18 +439,15 @@ async function abrirAcoesCompra(id) {
   compraEmEdicaoId = id;
   const registro = await DB.obterPorId('despesa', id);
   if (!registro) return;
-
   aplicarMascaraMoeda(document.getElementById('compraValor'));
   definirValorMascarado(document.getElementById('compraValor'), registro.valor);
   document.getElementById('compraDescricao').value = registro.descricao || '';
-  document.getElementById('compraData').value = registro.data.slice(0, 10);
-
-  const categorias = await DB.listarTodos('categoria');
-  document.getElementById('compraCategoriaChips').innerHTML = categorias.map((c) => `
-    <div class="chip ${c.id === registro.categoriaId ? 'selected' : ''}" data-id="${c.id}" onclick="selecionarCategoriaCompra(${c.id})">${c.icone} ${c.nome}</div>
-  `).join('');
-  document.getElementById('compraCategoriaChips').dataset.selecionado = registro.categoriaId;
-
+  document.getElementById('compraData').value = Datas.diaFinanceiro(registro.data) || '';
+  const categorias = await DB.listarCategoriasAtivas();
+  const chips = document.getElementById('compraCategoriaChips');
+  chips.innerHTML = categorias.map((c) => `
+    <div class="chip ${c.id === registro.categoriaId ? 'selected' : ''}" data-id="${c.id}" onclick="selecionarCategoriaCompra(${c.id})">${esc(c.icone)} ${esc(c.nome)}</div>`).join('');
+  chips.dataset.selecionado = registro.categoriaId;
   document.getElementById('sheetOverlayCompra').classList.add('open');
 }
 
@@ -659,56 +461,34 @@ function fecharModalCompra() {
   document.getElementById('sheetOverlayCompra').classList.remove('open');
   compraEmEdicaoId = null;
 }
-
-function fecharModalCompraSeClicarFora(event) {
-  if (event.target.id === 'sheetOverlayCompra') fecharModalCompra();
-}
+function fecharModalCompraSeClicarFora(event) { if (event.target.id === 'sheetOverlayCompra') fecharModalCompra(); }
 
 async function salvarEdicaoCompra() {
   if (!compraEmEdicaoId) return;
   const valor = valorNumericoDoInput(document.getElementById('compraValor'));
   if (!valor || valor <= 0) { alert('Valor inválido.'); return; }
-
   const categoriaId = Number(document.getElementById('compraCategoriaChips').dataset.selecionado);
   if (!categoriaId) { alert('Escolha uma categoria.'); return; }
-
-  const descricao = document.getElementById('compraDescricao').value.trim();
-  const dataEscolhida = document.getElementById('compraData').value; // "AAAA-MM-DD"
-  const [ano, mes, dia] = dataEscolhida.split('-').map(Number);
-  const dataFinal = new Date(ano, mes - 1, dia).toISOString();
-
-  const registro = await DB.obterPorId('despesa', compraEmEdicaoId);
-  // marca como editada manualmente: uma importação/reconciliação futura
-  // (Parte 2) não pode recriar nem desfazer silenciosamente essa alteração
-  await DB.atualizar('despesa', { ...registro, valor, categoriaId, descricao, data: dataFinal, editadoManualmente: true });
-
+  const data = Datas.interpretarDiaDigitado(document.getElementById('compraData').value);
+  if (!data) { alert('Data inválida.'); return; }
+  try {
+    await DB.atualizarDespesaManual(compraEmEdicaoId, { valor, categoriaId, descricao: document.getElementById('compraDescricao').value.trim(), data });
+  } catch (erro) { alert(erro.message); return; }
   fecharModalCompra();
   await iniciar();
 }
 
 async function excluirCompra() {
   if (!compraEmEdicaoId) return;
-  const ok = confirm('Excluir este lançamento? Essa ação não pode ser desfeita.');
-  if (!ok) return;
-
-  await DB.remover('despesa', compraEmEdicaoId);
+  if (!confirm('Excluir este lançamento? Essa ação não pode ser desfeita.')) return;
+  await DB.excluirDespesa(compraEmEdicaoId);
   fecharModalCompra();
   await iniciar();
 }
 
 async function excluirCartao() {
   const id = getIdDaUrl();
-  const ok = confirm('Excluir este cartão? As compras já registradas continuam no seu histórico, mas passam a aparecer como "Dinheiro/Pix" em vez do nome do banco.');
-  if (!ok) return;
-
-  // Desvincula as despesas desse cartão em vez de apagá-las
-  const despesas = await DB.listarTodos('despesa');
-  for (const d of despesas) {
-    if (d.cartaoId === id) {
-      await DB.atualizar('despesa', { ...d, cartaoId: null });
-    }
-  }
-
-  await DB.remover('cartao', id);
+  if (!confirm('Excluir este cartão? Ele sai das listas, mas faturas e compras já registradas continuam no histórico, nos meses corretos.')) return;
+  await DB.arquivarCartao(id);
   location.href = 'cartoes.html';
 }

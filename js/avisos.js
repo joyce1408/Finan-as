@@ -1,84 +1,56 @@
 // avisos.js — Central de Avisos: gera localmente, a cada abertura do app,
-// os mesmos alertas que seriam notificações push — sem precisar de servidor
-// (notificações push agendadas de verdade exigiriam infraestrutura paga,
-// o que quebraria a regra de custo zero do projeto).
+// os alertas que seriam notificações push (sem servidor, custo zero).
 
 async function gerarAvisos() {
   const avisos = [];
-  const hoje = new Date();
+  const moeda = (v) => UI.moeda(v);
 
-  // 1) Fatura vencendo em até 3 dias (ou já vencida e ainda não paga) —
-  // sempre a partir das faturas reais, nunca mais recalculado por data
+  // 1) Faturas vencendo em até 3 dias, vencidas não pagas, ou com
+  //    divergência de importação (soma dos itens acima do total oficial)
   const faturas = await DB.faturasClassificadas();
   for (const f of faturas) {
     if (f.situacao === 'vencida') {
-      avisos.push({
-        tipo: 'alerta',
-        icone: '💳',
-        texto: `Fatura do ${f.cartaoNome} venceu há ${Math.abs(f.diasRestantes)} dia(s) e ainda está marcada como não paga — ${f.totalOficial.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`
-      });
-    } else if (f.situacao === 'proxima' && f.diasRestantes <= 3) {
-      avisos.push({
-        tipo: 'alerta',
-        icone: '💳',
-        texto: `Fatura do ${f.cartaoNome} vence em ${f.diasRestantes} dia(s) — ${f.totalOficial.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. Separe o valor com antecedência.`
-      });
+      avisos.push({ tipo: 'alerta', icone: '💳', texto: `Fatura do ${f.cartaoNome} venceu há ${Math.abs(f.diasRestantes)} dia(s) e ainda está marcada como não paga: ${moeda(f.totalOficial)}.` });
+    } else if (f.situacao === 'proxima' && f.diasRestantes !== null && f.diasRestantes <= 3) {
+      avisos.push({ tipo: 'alerta', icone: '💳', texto: `Fatura do ${f.cartaoNome} vence em ${f.diasRestantes} dia(s): ${moeda(f.totalOficial)}. Separe o valor com antecedência.` });
+    }
+    if (f.divergencia && f.divergencia.tipo === 'soma_acima_do_total') {
+      avisos.push({ tipo: 'alerta', icone: '🔎', texto: `Fatura ${Datas.rotuloMes(f.mesFatura)} do ${f.cartaoNome}: os lançamentos somam ${moeda(f.divergencia.somaItens)}, acima do total oficial de ${moeda(f.divergencia.totalOficial)}. Revise os itens.` });
     }
   }
 
-  // 2) Lembrete noturno, se ainda não registrou nada hoje
-  if (hoje.getHours() >= 20) {
-    const registrouHoje = await DB.houveDespesaHoje();
-    if (!registrouHoje) {
-      avisos.push({
-        tipo: 'lembrete',
-        icone: '🌙',
-        texto: 'Você ainda não registrou nenhum gasto hoje. Leva 10 segundos e mantém seu controle em dia.'
-      });
-    }
+  // 2) Parcelas que precisam de revisão manual (reconciliação ambígua)
+  const pendentes = (await DB.listarTodos('despesa')).filter((d) => d.pendenteReconciliacao);
+  if (pendentes.length > 0) {
+    avisos.push({ tipo: 'lembrete', icone: '🧩', texto: `${pendentes.length} parcela(s) importada(s) não puderam ser ligadas com segurança a um parcelamento. Confira em Cartões.` });
   }
 
-  // 3) Comparação da semana atual com a semana anterior
-  const fimSemanaAtual = hoje;
-  const inicioSemanaAtual = new Date(hoje);
-  inicioSemanaAtual.setDate(hoje.getDate() - 6);
+  // 3) Lembrete noturno, se ainda não registrou nada hoje
+  if (Datas.agora().getHours() >= 20 && !(await DB.houveDespesaHoje())) {
+    avisos.push({ tipo: 'lembrete', icone: '🌙', texto: 'Você ainda não registrou nenhum gasto hoje. Leva 10 segundos e mantém seu controle em dia.' });
+  }
 
-  const fimSemanaAnterior = new Date(inicioSemanaAtual);
-  fimSemanaAnterior.setDate(inicioSemanaAtual.getDate() - 1);
-  const inicioSemanaAnterior = new Date(fimSemanaAnterior);
-  inicioSemanaAnterior.setDate(fimSemanaAnterior.getDate() - 6);
-
-  const gastoSemanaAtual = await DB.totalDespesasEntre(inicioSemanaAtual, fimSemanaAtual);
-  const gastoSemanaAnterior = await DB.totalDespesasEntre(inicioSemanaAnterior, fimSemanaAnterior);
-
-  if (gastoSemanaAnterior > 0 && gastoSemanaAtual < gastoSemanaAnterior) {
+  // 4) Semana atual × semana anterior (dias reais de compra)
+  const hoje = Datas.hojeISO();
+  const menosDias = (dia, n) => { const [a, m, d] = dia.split('-').map(Number); const t = new Date(Date.UTC(a, m - 1, d - n)); return Datas.montarDiaISO(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()); };
+  const gastoSemanaAtual = await DB.totalDespesasEntre(menosDias(hoje, 6), hoje);
+  const gastoSemanaAnterior = await DB.totalDespesasEntre(menosDias(hoje, 13), menosDias(hoje, 7));
+  if (gastoSemanaAnterior > 0 && gastoSemanaAtual > 0 && gastoSemanaAtual < gastoSemanaAnterior) {
     const percentual = ((gastoSemanaAnterior - gastoSemanaAtual) / gastoSemanaAnterior) * 100;
-    avisos.push({
-      tipo: 'sucesso',
-      icone: '🌟',
-      texto: `Você gastou ${percentual.toFixed(0)}% menos essa semana do que na anterior. Continue assim!`
-    });
+    avisos.push({ tipo: 'sucesso', icone: '🌟', texto: `Você gastou ${percentual.toFixed(0)}% menos essa semana do que na anterior. Continue assim!` });
   }
 
-  // 4) Sugestão de enviar a sobra do mês para a reserva
-  const entradas = await DB.entradasTotaisDoMes();
-  const despesasDoMes = await DB.totalGastoNoMes();
-  const saldo = entradas - despesasDoMes;
-  const reservas = await DB.listarTodos('reserva');
-  const reserva = reservas[0] || { valorAtual: 0, meta: 15000 };
-
-  if (saldo > 100 && reserva.valorAtual < reserva.meta) {
-    avisos.push({
-      tipo: 'sugestao',
-      icone: '💰',
-      texto: `Sobrou ${saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} este mês. Que tal transferir para sua reserva de emergência?`
-    });
+  // 5) Sobra do mês → reserva (só quando existe meta definida e não atingida)
+  const { entradas, saldo } = await DB.saldoDisponivelDoMes();
+  const reserva = Analises.avaliarReserva(await DB.obterReserva());
+  if (saldo > 100 && reserva.estado === 'em_formacao') {
+    avisos.push({ tipo: 'sugestao', icone: '💰', texto: `Sobrou ${moeda(saldo)} este mês. Que tal transferir para sua reserva de emergência?` });
   }
 
-  // 5) Comprometimento alto do cartão frente à renda
-  const parcelas = await DB.parcelasProximoMes();
-  const avaliacaoCartao = Motor.avaliarComprometimentoCartao(parcelas, entradas);
-  if (avaliacaoCartao.bloquear) {
+  // 6) Parcelas do próximo mês × renda do próximo mês (limite de 30%)
+  const mesSeguinte = DB.somarMesISO(DB.mesAtualISO(), 1);
+  const avaliacaoCartao = Analises.avaliarComprometimentoCartao(await DB.parcelasProximoMes(), await DB.rendaAtual(mesSeguinte));
+  if (avaliacaoCartao.bloquear && entradas >= 0) {
     avisos.push({ tipo: 'alerta', icone: '⚠️', texto: avaliacaoCartao.texto });
   }
 

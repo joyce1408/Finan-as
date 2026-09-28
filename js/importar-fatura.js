@@ -14,21 +14,20 @@ function parseValorMonetario(texto) {
   return parseFloat(limpo);
 }
 
+// Devolve o dia "AAAA-MM-DD" (nunca um instante com fuso) ou null.
 function parseDataFatura(texto) {
+  if (typeof texto !== 'string') return null;
   const t = texto.trim();
-  // DD/MM/AAAA
   let m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) {
-    const [, dia, mes, ano] = m;
-    return new Date(Number(ano), Number(mes) - 1, Number(dia)).toISOString();
+  let ano, mes, dia;
+  if (m) { [dia, mes, ano] = [Number(m[1]), Number(m[2]), Number(m[3])]; }
+  else {
+    m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) return null;
+    [ano, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])];
   }
-  // AAAA-MM-DD
-  m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (m) {
-    const [, ano, mes, dia] = m;
-    return new Date(Number(ano), Number(mes) - 1, Number(dia)).toISOString();
-  }
-  return null;
+  if (mes < 1 || mes > 12 || dia < 1 || dia > new Date(Date.UTC(ano, mes, 0)).getUTCDate()) return null;
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
 }
 
 function pareceCabecalho(colunas) {
@@ -130,7 +129,7 @@ function extrairParcela(descricao) {
   if (!m) return null;
   const parcelaAtual = parseInt(m[1], 10);
   const parcelaTotal = parseInt(m[2], 10);
-  if (!parcelaAtual || !parcelaTotal || parcelaAtual < 1 || parcelaTotal < 1 || parcelaAtual > parcelaTotal) return null;
+  if (!parcelaAtual || !parcelaTotal || parcelaAtual < 1 || parcelaTotal < 2 || parcelaAtual > parcelaTotal) return null;
   return { parcelaAtual, parcelaTotal };
 }
 

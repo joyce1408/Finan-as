@@ -15,7 +15,7 @@ function extrairData(linha, anoReferencia, mesReferencia) {
     ano = parseInt(ano, 10);
     if (ano < 100) ano += 2000;
     if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
-    return { iso: new Date(ano, mes - 1, dia).toISOString(), textoEncontrado: m[0] };
+    return { iso: diaISO(ano, mes, dia), textoEncontrado: m[0] };
   }
 
   // formato sem ano: dd/mm — é assim que a MAIORIA das faturas de cartão
@@ -33,10 +33,17 @@ function extrairData(linha, anoReferencia, mesReferencia) {
     let ano = anoReferencia;
     if (mesReferencia && mes > mesReferencia) ano -= 1;
 
-    return { iso: new Date(ano, mes - 1, dia).toISOString(), textoEncontrado: m[0] };
+    return { iso: diaISO(ano, mes, dia), textoEncontrado: m[0] };
   }
 
   return null;
+}
+
+// Dia financeiro "AAAA-MM-DD" (sem fuso). Dia inexistente (31/02) → limita
+// ao último dia do mês, como o OCR às vezes lê errado.
+function diaISO(ano, mes, dia) {
+  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(Math.min(dia, ultimo)).padStart(2, '0')}`;
 }
 
 // Procura em qualquer lugar do texto uma data completa (dd/mm/aaaa) — faturas
@@ -44,7 +51,7 @@ function extrairData(linha, anoReferencia, mesReferencia) {
 // para interpretar as datas sem ano de cada lançamento.
 function detectarAnoDeReferencia(textoCompleto) {
   const m = textoCompleto.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
-  if (!m) return { ano: new Date().getFullYear(), mes: null };
+  if (!m) return { ano: (typeof Datas !== 'undefined' ? Datas.agora() : new Date()).getFullYear(), mes: null };
 
   let ano = parseInt(m[3], 10);
   if (ano < 100) ano += 2000;

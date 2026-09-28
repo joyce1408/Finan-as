@@ -1,110 +1,33 @@
-// categorias.js — CRUD de categorias, incluindo o campo grupoGrafico que
-// alimenta o gráfico de colunas em Relatórios.
-
-const ICONES_DISPONIVEIS = ['🏷️', '🐾', '🏋️', '📚', '☕', '🎓', '💊', '⚡', '🎬', '📦', '⛽', '🎮', '🏥', '👶', '✈️', '🎁', '🧴', '🐶', '🌱', '🎨'];
-const GRUPOS_DISPONIVEIS = ['Essenciais', 'Alimentação', 'Transporte', 'Lazer', 'Outros'];
-
-let iconeSelecionado = null;
-let grupoSelecionadoModal = null;
-
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+// categorias.js — mostra a taxonomia DEFINITIVA (11 categorias fixas) com o
+// que foi gasto em cada uma no mês, e as categorias antigas desativadas pela
+// migração (só para conferência; nada é apagado).
 
 async function renderCategoriasLista() {
-  const categorias = await DB.listarTodos('categoria');
-  const lista = document.getElementById('listaCategorias');
-
-  lista.innerHTML = categorias.map((c) => {
-    const ehOutros = c.nome === 'Outros';
-    return `
-      <div class="cat-manage-row">
-        <div class="cat-manage-icon">${c.icone}</div>
-        <div class="cat-manage-info">
-          <div class="cat-manage-nome">${c.nome}</div>
-          <div class="cat-manage-meta">${c.grupoGrafico || 'Outros'}${c.limiteMensal ? ` · limite ${formatarMoeda(c.limiteMensal)}` : ''}</div>
-        </div>
-        <button class="cat-manage-delete" ${ehOutros ? 'disabled title="\'Outros\' não pode ser excluída — é o destino padrão de despesas sem categoria"' : ''} onclick="${ehOutros ? '' : `excluirCategoria(${c.id}, '${c.nome.replace(/'/g, "\\'")}')`}">🗑️</button>
+  const ativas = await DB.listarCategoriasAtivas();
+  const gastos = await DB.gastosPorCategoria(DB.mesAtualISO());
+  const totalPorId = Object.fromEntries(gastos.map((c) => [c.id, c.total]));
+  const exemplos = {
+    'Moradia': 'aluguel, condomínio, luz, água, internet', 'Alimentação': 'mercado, padaria, restaurante, iFood',
+    'Transporte': 'Uber, 99, combustível, estacionamento', 'Assinaturas': 'Netflix, Spotify, serviços mensais',
+    'Saúde': 'farmácia, drogaria, consultas, exames', 'Pet': 'veterinário, pet shop, ração',
+    'Vestuário': 'roupas e calçados', 'Compras': 'eletrônicos e compras gerais', 'Lazer': 'cinema, jogos, viagens',
+    'Taxas e encargos': 'IOF, tarifas, anuidade, juros', 'Outros': 'o que não se encaixa acima'
+  };
+  document.getElementById('listaCategorias').innerHTML = ativas.map((c) => `
+    <div class="cat-manage-row">
+      <div class="cat-manage-icon">${UI.escapar(c.icone)}</div>
+      <div class="cat-manage-info">
+        <div class="cat-manage-nome">${UI.escapar(c.nome)}</div>
+        <div class="cat-manage-meta">${UI.escapar(exemplos[c.nome] || '')} · neste mês: ${UI.moeda(totalPorId[c.id] || 0)}</div>
       </div>
-    `;
-  }).join('');
-}
+    </div>`).join('');
 
-function abrirModalCategoria() {
-  document.getElementById('inputNomeCategoria').value = '';
-  document.getElementById('inputLimiteCategoria').value = '';
-  aplicarMascaraMoeda(document.getElementById('inputLimiteCategoria'));
-  iconeSelecionado = ICONES_DISPONIVEIS[0];
-  grupoSelecionadoModal = 'Outros';
-
-  document.getElementById('iconPickerGrid').innerHTML = ICONES_DISPONIVEIS.map((icone) => `
-    <button class="icon-picker-btn ${icone === iconeSelecionado ? 'selected' : ''}" data-icone="${icone}" onclick="selecionarIcone('${icone}')">${icone}</button>
-  `).join('');
-
-  document.getElementById('grupoPicker').innerHTML = GRUPOS_DISPONIVEIS.map((g) => `
-    <div class="grupo-chip ${g === grupoSelecionadoModal ? 'selected' : ''}" data-grupo="${g}" onclick="selecionarGrupo('${g}')">${g}</div>
-  `).join('');
-
-  document.getElementById('sheetOverlay').classList.add('open');
-}
-
-function selecionarIcone(icone) {
-  iconeSelecionado = icone;
-  document.querySelectorAll('.icon-picker-btn').forEach((b) => b.classList.toggle('selected', b.dataset.icone === icone));
-}
-
-function selecionarGrupo(grupo) {
-  grupoSelecionadoModal = grupo;
-  document.querySelectorAll('.grupo-chip').forEach((b) => b.classList.toggle('selected', b.dataset.grupo === grupo));
-}
-
-function fecharModal() {
-  document.getElementById('sheetOverlay').classList.remove('open');
-}
-
-function fecharModalSeClicarFora(event) {
-  if (event.target.id === 'sheetOverlay') fecharModal();
-}
-
-async function salvarCategoria() {
-  const nome = document.getElementById('inputNomeCategoria').value.trim();
-  const limiteTexto = document.getElementById('inputLimiteCategoria').value;
-  const limiteMensal = limiteTexto ? parseFloat(limiteTexto) : 200;
-
-  if (!nome) { alert('Digite um nome para a categoria.'); return; }
-
-  // Essenciais/Alimentação/Transporte contam como gasto essencial pro motor
-  // de regras; Lazer/Outros contam como estilo de vida
-  const tipo = ['Essenciais', 'Alimentação', 'Transporte'].includes(grupoSelecionadoModal) ? 'essencial' : 'estilo_de_vida';
-
-  await DB.adicionar('categoria', {
-    nome,
-    icone: iconeSelecionado,
-    grupoGrafico: grupoSelecionadoModal,
-    tipo,
-    limiteMensal: isNaN(limiteMensal) ? 200 : limiteMensal
-  });
-
-  fecharModal();
-  await renderCategoriasLista();
-}
-
-async function excluirCategoria(id, nome) {
-  const ok = confirm(`Excluir a categoria "${nome}"? As despesas já registradas nela passam a ser contadas em "Outros".`);
-  if (!ok) return;
-
-  const categorias = await DB.listarTodos('categoria');
-  const outros = categorias.find((c) => c.nome === 'Outros');
-
-  const despesas = await DB.listarTodos('despesa');
-  for (const d of despesas) {
-    if (d.categoriaId === id) {
-      await DB.atualizar('despesa', { ...d, categoriaId: outros.id });
-    }
-  }
-
-  await DB.remover('categoria', id);
-  await renderCategoriasLista();
+  const arquivadas = (await DB.listarTodos('categoria')).filter((c) => c.ativa === false);
+  document.getElementById('categoriasArquivadas').innerHTML = arquivadas.length === 0 ? '' : `
+    <div style="font-size:12px;color:var(--ink-soft);margin-top:18px;line-height:1.5">
+      Categorias antigas desativadas na atualização (os lançamentos foram para as categorias novas):
+      ${arquivadas.map((c) => `${UI.escapar(c.nome)} → ${UI.escapar(c.substituidaPor === 'categorizacao_por_descricao' ? 'conforme a descrição' : c.substituidaPor)}`).join(' · ')}
+    </div>`;
 }
 
 (async function iniciar() {
