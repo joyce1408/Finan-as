@@ -274,3 +274,46 @@ html, body {
 .reserva-card-label { font-size: 12px; color: var(--ink-soft); }
 .reserva-card-value { font-size: 20px; font-weight: 700; margin-top: 2px; }
 .reserva-card-meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+
+/* ---------- Bateria financeira (Home) ---------- */
+.bateria-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 16px 20px;
+  margin-top: 14px;
+}
+.bateria-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bateria-titulo { font-size: 12px; color: var(--ink-soft); }
+.bateria-texto { font-size: 13px; font-weight: 600; margin-top: 2px; line-height: 1.4; }
+.bateria-icone { display: flex; align-items: center; flex-shrink: 0; }
+.bateria-corpo {
+  width: 64px; height: 28px; border: 2.5px solid var(--ink); border-radius: 7px;
+  padding: 2px; box-sizing: border-box; overflow: hidden; background: #fff;
+}
+.bateria-polo { width: 4px; height: 12px; background: var(--ink); border-radius: 0 3px 3px 0; margin-left: 2px; }
+.bateria-nivel { height: 100%; border-radius: 3px; background: var(--ink-soft); transition: width 0.8s ease, background-color 0.4s ease; }
+.bateria-nivel.alta { background: var(--green); }
+.bateria-nivel.media { background: var(--amber); }
+.bateria-nivel.baixa { background: var(--red); }
+.bateria-pct { font-size: 20px; font-weight: 700; margin-top: 8px; }
+.bateria-legenda { font-size: 11px; color: var(--ink-soft); margin-top: 4px; line-height: 1.4; }
+
+/* ---------- Tabelas simples de evolução (Relatórios) ---------- */
+.evo-tabela { width: 100%; border-collapse: collapse; font-size: 12px; }
+.evo-tabela th, .evo-tabela td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.evo-tabela th:first-child, .evo-tabela td:first-child { text-align: left; }
+.evo-tabela th { color: var(--ink-soft); font-weight: 600; }
+.evo-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sem-dados { color: var(--ink-soft); font-style: italic; }
+.aviso-divergencia { background: var(--amber-soft); color: #8A5A10; border-radius: 12px; padding: 10px 12px; font-size: 12.5px; line-height: 1.45; margin: 8px 0; }
+.tag-revisao { background: var(--amber-soft); color: #8A5A10; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; }
+
+/* Respeita "reduzir movimento" do sistema: sem animações nem transições */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
