@@ -46,10 +46,10 @@
     </div>
 
     <div class="section-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px">
-      <div class="section-head-title" style="font-size:14px;font-weight:700">Compras deste cartão</div>
+      <div class="section-head-title" style="font-size:14px;font-weight:700">Faturas</div>
       <button class="import-btn" onclick="document.getElementById('inputFatura').click()">📎 Importar fatura</button>
     </div>
-    <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px">Aceita foto, PDF ou CSV — o app identifica sozinho o tipo de arquivo e lê do jeito certo.</div>
+    <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px">Aceita CSV, PDF ou foto (OCR). Antes de gravar, você confere cartão, mês, fechamento, vencimento, total oficial e itens. Dá para importar faturas antigas.</div>
     <input type="file" id="inputFatura" accept=".pdf,application/pdf,image/*,.csv,text/csv,text/plain,.txt" style="display:none">
     <div id="progressoOcr" style="display:none"></div>
     <div id="previewImportacao"></div>
@@ -113,8 +113,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/2.1.5/tesseract.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  // sem internet a biblioteca de PDF não carrega: a tela continua funcionando
+  if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 </script>
+<script src="js/datas.js"></script>
+<script src="js/categorizacao.js"></script>
+<script src="js/analises.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/db.js"></script>
 <script src="js/motor.js"></script>
 <script src="js/moeda.js"></script>

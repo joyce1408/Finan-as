@@ -59,14 +59,9 @@
         <span class="menu-value" id="rendaFixa">—</span>
         <span class="menu-chevron">›</span>
       </div>
-      <div class="menu-item clickable" onclick="limparDespesasExemplo()">
-        <div class="menu-icon">🧹</div>
-        <div class="menu-label">Limpar despesas de exemplo</div>
-        <span class="menu-chevron">›</span>
-      </div>
-      <div class="menu-item clickable" onclick="removerDuplicatas()">
+      <div class="menu-item clickable" onclick="conferirDuplicatas()">
         <div class="menu-icon">🔁</div>
-        <div class="menu-label">Remover despesas duplicadas</div>
+        <div class="menu-label">Conferir possíveis duplicatas</div>
         <span class="menu-chevron">›</span>
       </div>
     </div>
@@ -129,10 +124,19 @@
     <div class="sheet-handle"></div>
     <div class="sheet-title" id="tituloModalValor">Editar valor</div>
     <input type="text" inputmode="numeric" class="value-input" id="inputModalValor" placeholder="R$ 0,00">
+    <div id="blocoPrazoReserva" style="display:none">
+      <div class="field-label">Prazo para atingir a meta, em meses (opcional)</div>
+      <input type="number" inputmode="numeric" min="1" max="600" class="text-input" id="inputPrazoReserva" placeholder="Deixe vazio se não quiser prazo">
+      <div class="inline-note">Com meta R$ 0,00 a reserva aparece como "meta não definida". O app não inventa prazo nem valor de aporte.</div>
+    </div>
     <button class="save-btn" onclick="salvarModalValor()">Salvar</button>
   </div>
 </div>
 
+<script src="js/datas.js"></script>
+<script src="js/categorizacao.js"></script>
+<script src="js/analises.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/db.js"></script>
 <script src="js/moeda.js"></script>
 <script src="js/mais.js"></script>

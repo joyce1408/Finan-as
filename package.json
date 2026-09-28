@@ -1,9 +1,10 @@
 {
   "name": "financas-facil",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "PWA local-first de controle financeiro pessoal. Sem build step — index.html e as outras páginas referenciam js/*.js direto via <script>, e é assim que o app roda no GitHub Pages. package.json e a pasta test/ existem só para rodar os testes automatizados de js/db.js em Node (npm test), usando um polyfill mínimo de IndexedDB escrito em test/fake-indexeddb.js (sem dependência externa). Nada nesta pasta é necessário para o app funcionar no navegador.",
+  "description": "PWA local-first de controle financeiro pessoal. Sem build step: as páginas referenciam js/*.js direto via <script>, e é assim que o app roda no GitHub Pages. package.json e a pasta test/ existem só para os testes automatizados em Node (npm test), com um IndexedDB falso em memória (test/fake-indexeddb.js), sem dependência externa. Nada disso é necessário para o app funcionar no navegador.",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node test/rodar-todos.js",
+    "validar-backup": "node ferramentas/validar-backup.js"
   }
 }

@@ -55,6 +55,21 @@
       </div>
     </div>
 
+    <div class="bateria-card" id="bateriaCard" aria-live="polite">
+      <div class="bateria-topo">
+        <div>
+          <div class="bateria-titulo">Bateria do mês</div>
+          <div class="bateria-texto" id="bateriaTexto">—</div>
+        </div>
+        <div class="bateria-icone" id="bateriaIcone" role="img" aria-label="Bateria financeira">
+          <div class="bateria-corpo"><div class="bateria-nivel" id="bateriaNivel" style="width:0%"></div></div>
+          <div class="bateria-polo"></div>
+        </div>
+      </div>
+      <div class="bateria-pct" id="bateriaPct">—</div>
+      <div class="bateria-legenda">Quanto das entradas do mês ainda não foi gasto (gastos confirmados). 100% = nada gasto; 0% = gastou tudo.</div>
+    </div>
+
     <div class="reserva-card">
       <div>
         <div class="reserva-card-label">Reserva de emergência</div>
@@ -105,6 +120,10 @@
     <input type="text" inputmode="numeric" class="value-input" id="inputValor" placeholder="R$ 0,00" autofocus>
 
     <div id="camposDespesa">
+      <div class="field-label">Descrição</div>
+      <input type="text" id="inputDescricaoDespesa" class="text-input" placeholder="Ex.: iFood, farmácia, Uber..." autocomplete="off">
+      <div class="inline-note" id="sugestaoCategoria" style="display:none"></div>
+
       <div class="field-label">Categoria</div>
       <div class="chip-grid" id="categoriaChips"></div>
 
@@ -131,6 +150,8 @@
     <div id="camposReceita" style="display:none">
       <div class="field-label">Descrição</div>
       <input type="text" id="inputDescricaoReceita" class="text-input" placeholder="Ex.: Freela, reembolso, bônus...">
+      <div class="field-label">Data</div>
+      <input type="date" id="inputDataReceita" class="text-input">
     </div>
 
     <div id="camposReserva" style="display:none">
@@ -141,6 +162,10 @@
   </div>
 </div>
 
+<script src="js/datas.js"></script>
+<script src="js/categorizacao.js"></script>
+<script src="js/analises.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/db.js"></script>
 <script src="js/motor.js"></script>
 <script src="js/moeda.js"></script>

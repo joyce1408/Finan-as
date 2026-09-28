@@ -19,13 +19,13 @@
   <div class="screen">
     <div class="header-row" style="display:flex;align-items:center;gap:12px;margin-top:8px;margin-bottom:4px">
       <span onclick="location.href='mais.html'" style="font-size:19px;cursor:pointer">←</span>
-      <span class="page-title" style="margin:0">Gerenciar Categorias</span>
+      <span class="page-title" style="margin:0">Categorias</span>
     </div>
-    <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:18px">Crie categorias suas e escolha em qual coluna dos Relatórios cada uma entra.</div>
+    <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:18px;line-height:1.5">O app usa 11 categorias fixas, pela finalidade do gasto. Delivery, fast food, remédios e marketplace são tipos de gasto dentro delas (ex.: iFood é Alimentação, farmácia é Saúde). A categoria que você escolher num lançamento nunca é trocada pela automática.</div>
 
     <div class="cat-manage-list" id="listaCategorias"></div>
 
-    <button class="add-cat-btn" onclick="abrirModalCategoria()">+ Nova categoria</button>
+    <div id="categoriasArquivadas"></div>
   </div>
 
   <div class="tabbar">
@@ -36,28 +36,10 @@
   </div>
 </div>
 
-<!-- Modal de nova categoria -->
-<div class="sheet-overlay" id="sheetOverlay" onclick="fecharModalSeClicarFora(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title">Nova categoria</div>
-
-    <div class="field-label">Nome</div>
-    <input type="text" id="inputNomeCategoria" class="text-input" placeholder="Ex.: Pets, Academia, Cursos...">
-
-    <div class="field-label">Ícone</div>
-    <div class="icon-picker-grid" id="iconPickerGrid"></div>
-
-    <div class="field-label">Em qual coluna dos Relatórios ela entra?</div>
-    <div class="grupo-picker" id="grupoPicker"></div>
-
-    <div class="field-label">Limite mensal (opcional)</div>
-    <input type="text" inputmode="numeric" id="inputLimiteCategoria" class="text-input" placeholder="R$ 0,00">
-
-    <button class="save-btn" onclick="salvarCategoria()">Salvar categoria</button>
-  </div>
-</div>
-
+<script src="js/datas.js"></script>
+<script src="js/categorizacao.js"></script>
+<script src="js/analises.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/db.js"></script>
 <script src="js/moeda.js"></script>
 <script src="js/categorias.js"></script>

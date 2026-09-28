@@ -16,7 +16,7 @@
 // (arquivos estáticos), nunca no IndexedDB (onde ficam os dados financeiros
 // reais) — ver o listener 'activate', que só chama caches.delete(), nunca
 // indexedDB.deleteDatabase().
-const CACHE_NAME = 'financas-app-v16';
+const CACHE_NAME = 'financas-app-v18';
 const ARQUIVOS_PARA_CACHE = [
   './index.html',
   './onboarding.html',
@@ -36,6 +36,10 @@ const ARQUIVOS_PARA_CACHE = [
   './css/mais.css',
   './css/seguranca.css',
   './css/categorias.css',
+  './js/datas.js',
+  './js/categorizacao.js',
+  './js/analises.js',
+  './js/ui.js',
   './js/db.js',
   './js/motor.js',
   './js/app.js',
@@ -75,6 +79,9 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // só GET do próprio app entra no cache (bibliotecas de CDN e outros
+  // métodos passam direto pela rede)
+  if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
   event.respondWith(
     fetch(event.request)
       .then((respostaDaRede) => {

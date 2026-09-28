@@ -62,7 +62,7 @@
     </div>
 
     <div class="section-head"><div class="section-head-title">🗓️ Histórico mensal</div></div>
-    <div class="cat-hint">Total de gastos por mês de competência (fatura de cartão conta no mês dela, não em quando foi paga)</div>
+    <div class="cat-hint">Gastos confirmados por mês de competência (compra no cartão conta no mês da fatura dela, não na data da compra)</div>
     <div class="chart-card">
       <div id="historicoMensalList" style="display:flex;flex-direction:column;gap:14px"></div>
     </div>
@@ -72,17 +72,38 @@
     <div class="cat-list" id="barChartRow"></div>
     <div id="categoriasSemGasto"></div>
 
+    <div class="section-head"><div class="section-head-title">📈 Evolução por categoria</div></div>
+    <div class="cat-hint">Últimos 6 meses até o mês selecionado, por competência. "Sem dados" = nenhum gasto confirmado daquela categoria no mês.</div>
+    <div class="chart-card evo-scroll" id="evolucaoCategoriaBox"></div>
+
+    <div class="section-head"><div class="section-head-title">🧭 Gastos sob controle?</div></div>
+    <div id="sobControleBox"></div>
+
+    <div class="section-head"><div class="section-head-title">✂️ Onde posso poupar?</div></div>
+    <div class="cat-hint">Compara o mês selecionado com o SEU histórico de cada categoria. Com menos de 3 meses de dados numa categoria, não há conclusão.</div>
+    <div id="ondePouparBox"></div>
+
+    <div class="section-head"><div class="section-head-title">📈 Onde investir a sobra</div></div>
+    <div id="insightsBox"></div>
+
     <div class="glossario-card">
       <div class="glossario-title">O que entra em cada categoria</div>
-      <div class="glossario-item"><strong>🏠 Essenciais</strong> — Moradia, contas, saúde, mercado</div>
-      <div class="glossario-item"><strong>🍴 Alimentação</strong> — Restaurantes e compras de comida</div>
-      <div class="glossario-item"><strong>🚗 Transporte</strong> — Combustível, apps de transporte, transporte público</div>
-      <div class="glossario-item"><strong>🍿 Lazer</strong> — Viagens, restaurantes de lazer, cinema, delivery, assinaturas</div>
-      <div class="glossario-item"><strong>💬 Outros</strong> — Gastos esporádicos ou imprevistos</div>
+      <div class="glossario-item"><strong>🏠 Moradia</strong>: aluguel, condomínio, luz, água, gás, internet</div>
+      <div class="glossario-item"><strong>🍴 Alimentação</strong>: mercado, padaria, restaurante, iFood, delivery</div>
+      <div class="glossario-item"><strong>🚗 Transporte</strong>: Uber, 99, combustível, estacionamento, transporte público</div>
+      <div class="glossario-item"><strong>📺 Assinaturas</strong>: Netflix, Spotify e outros serviços recorrentes</div>
+      <div class="glossario-item"><strong>💊 Saúde</strong>: farmácia, drogaria, consultas, exames</div>
+      <div class="glossario-item"><strong>🐾 Pet</strong>: veterinário, pet shop, ração</div>
+      <div class="glossario-item"><strong>👕 Vestuário</strong>: roupas e calçados (inclusive em Amazon/Mercado Livre)</div>
+      <div class="glossario-item"><strong>🛍️ Compras</strong>: eletrônicos e compras gerais</div>
+      <div class="glossario-item"><strong>🍿 Lazer</strong>: cinema, jogos, viagens, passeios</div>
+      <div class="glossario-item"><strong>🧾 Taxas e encargos</strong>: IOF, tarifas, anuidade, juros</div>
+      <div class="glossario-item"><strong>💬 Outros</strong>: o que não se encaixa acima</div>
     </div>
 
-    <div class="section-head"><div class="section-head-title">💡 Onde posso poupar / investir</div></div>
-    <div id="insightsBox"></div>
+    <div class="section-head"><div class="section-head-title">🔮 Compromissos futuros (previstos)</div></div>
+    <div class="cat-hint">Parcelas previstas por mês. Não entram nos gastos realizados até a fatura real chegar.</div>
+    <div class="chart-card" id="previstasBox"></div>
 
     <div class="section-head" style="margin-top:22px"><div class="section-head-title">🎯 Evolução da reserva</div></div>
     <div class="chart-card" id="reservaChartCard">
@@ -92,7 +113,7 @@
     <div class="section-head"><div class="section-head-title">💳 Comprometimento do cartão</div></div>
     <div class="commit-card">
       <div class="commit-top">
-        <span class="commit-label">Parcelas futuras vs. renda</span>
+        <span class="commit-label">Parcelas do próximo mês vs. renda</span>
         <span class="commit-pct" id="commitPct">0%</span>
       </div>
       <div class="commit-track"><div class="commit-fill" id="commitFill" style="width:0%"></div></div>
@@ -108,6 +129,10 @@
   </div>
 </div>
 
+<script src="js/datas.js"></script>
+<script src="js/categorizacao.js"></script>
+<script src="js/analises.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/db.js"></script>
 <script src="js/motor.js"></script>
 <script src="js/relatorios.js"></script>
